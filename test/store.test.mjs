@@ -69,3 +69,13 @@ test("watch sees another store's update", async () => {
     setTimeout(() => b.update((s) => { s.items.x = rec(3); }), 50);
   }).finally(() => stop?.());
 });
+
+test("R10: wrong-shaped file is set aside, memory kept", () => {
+  const f = tmp();
+  const s = new Store(f);
+  s.state.items.keep = rec(1);
+  writeFileSync(f, '{"items":null}');
+  assert.doesNotThrow(() => s.load());
+  assert.ok(s.state.items.keep);
+  assert.ok(readdirSync(join(f, "..")).some((n) => n.startsWith("progress.json.corrupt-")));
+});

@@ -56,14 +56,15 @@ export class Store {
   load(): Progress {
     let text: string;
     try { text = readFileSync(this.file, "utf8"); } catch { return this.state; }
-    let parsed: Progress;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      renameSync(this.file, `${this.file}.corrupt-${Date.now()}`);
+    let parsed: Progress | null = null;
+    try { parsed = JSON.parse(text); } catch { parsed = null; }
+    const obj = (v: unknown) => typeof v === "object" && v !== null;
+    if (!obj(parsed) || !(["items", "days", "snooze", "pause"] as const).every((k) => parsed![k] === undefined || obj(parsed![k]))) {
+      // Another window may have set it aside first.
+      try { renameSync(this.file, `${this.file}.corrupt-${Date.now()}`); } catch { /* already moved */ }
       return this.state;
     }
-    this.state = mergeProgress(parsed, this.state);
+    this.state = mergeProgress(parsed!, this.state);
     return this.state;
   }
 
