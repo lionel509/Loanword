@@ -28,3 +28,8 @@ export function isExcluded(path: string, folders: string[]): boolean {
     return !!dir && (p === dir || p.startsWith(dir + "/"));
   });
 }
+
+/** The deck path may never point into Vanguard; it is off-limits. */
+export function forbiddenPath(p: string): boolean {
+  return /(^|\/)vanguard(\/|$)/i.test(p);
+}

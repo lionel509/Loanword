@@ -9,9 +9,11 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+// ponytail: imports the .ts directly; needs Node >= 22.18 for type stripping
+import { forbiddenPath } from "./src/settings.ts";
 
 export function forbidden(vaultPath) {
-  return /(^|\/)vanguard(\/|$)/i.test(resolve(vaultPath));
+  return forbiddenPath(resolve(vaultPath));
 }
 
 /** Seed only what is unset, so a re-run never undoes a choice. */
