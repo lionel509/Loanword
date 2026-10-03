@@ -13,7 +13,7 @@ import { buildLexicon, type Lexicon } from "./pick";
 import { makeQuestion } from "./question";
 import { QuizPopover } from "./quiz-ui";
 import { addDays, buildSession, dayKey, grade, isDone, type Mode, type Session } from "./schedule";
-import { DEFAULT_SETTINGS, isExcluded, type LoanwordSettings } from "./settings";
+import { DEFAULT_SETTINGS, forbiddenPath, isExcluded, type LoanwordSettings } from "./settings";
 import { Store } from "./store";
 import { ProgressView, VIEW_TYPE } from "./view";
 
@@ -35,7 +35,6 @@ export default class LoanwordPlugin extends Plugin {
   private deckWatcher: FSWatcher | null = null;
   private deckTimer: number | null = null;
   private warnedNoDeck = false;
-  private hooked = false;
 
   async onload() {
     this.cfg = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -96,6 +95,8 @@ export default class LoanwordPlugin extends Plugin {
       },
     })]);
 
+    this.registerDomEvent(window, "focus", () => this.onStoreChange());
+    this.registerInterval(window.setInterval(() => void this.maybePrompt(false), 60_000));
     this.app.workspace.onLayoutReady(() => this.boot());
   }
 
@@ -125,6 +126,11 @@ export default class LoanwordPlugin extends Plugin {
     this.store = null;
     this.deck = [];
     const dir = this.cfg.deckPath;
+    if (forbiddenPath(dir)) {
+      new Notice("Loanword: that deck path is off-limits");
+      this.refreshAll();
+      return;
+    }
     let ok = false;
     try { ok = !!dir && isAbsolute(dir) && statSync(dir).isDirectory(); } catch { ok = false; }
     if (!ok) {
@@ -133,21 +139,17 @@ export default class LoanwordPlugin extends Plugin {
       this.refreshAll();
       return;
     }
+    this.loadDeck();
+    if (!this.deck.length) { this.refreshAll(); return; }   // no cards: create nothing
     mkdirSync(join(dir, ".loanword"), { recursive: true });
     this.store = new Store(join(dir, ".loanword", "progress.json"));
     this.store.load();
     this.stopStore = this.store.watch(() => this.onStoreChange());
-    this.loadDeck();
     this.deckWatcher = watch(dir, { persistent: false }, (_e, name) => {
       if (!name || !String(name).endsWith(".md")) return;   // A2: ignore .loanword/ writes
       if (this.deckTimer !== null) window.clearTimeout(this.deckTimer);
       this.deckTimer = window.setTimeout(() => { this.loadDeck(); this.refreshAll(); }, 500);
     });
-    if (!this.hooked) {   // boot() re-runs when the deck path changes; hook these once
-      this.hooked = true;
-      this.registerDomEvent(window, "focus", () => this.onStoreChange());
-      this.registerInterval(window.setInterval(() => void this.maybePrompt(false), 60_000));
-    }
     window.setTimeout(() => void this.maybePrompt(false), 1500);
     this.refreshAll();
   }
@@ -363,12 +365,14 @@ class LoanwordSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Deck folder")
       .setDesc("Absolute path to the folder of deck notes. Progress lives in a .loanword folder inside it.")
-      .addText((t) => t.setValue(p.cfg.deckPath).onChange(async (v) => {
-        p.cfg.deckPath = v.trim();
-        await p.saveSettings();
-        // ponytail: a new deck path needs a re-boot, not just a refresh
-        p.boot();
-      }));
+      .addText((t) => {
+        t.setValue(p.cfg.deckPath).onChange(async (v) => {
+          p.cfg.deckPath = v.trim();
+          await p.saveSettings();
+        });
+        // Re-boot on blur/Enter only, never per keystroke.
+        t.inputEl.addEventListener("change", () => p.boot());
+      });
 
     const num = (name: string, desc: string, key: "newPerDay" | "swapEvery" | "maxSwapsPerNote") =>
       new Setting(containerEl).setName(name).setDesc(desc)
