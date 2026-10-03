@@ -7,7 +7,7 @@
   "scripts": {
     "build": "node esbuild.config.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node esbuild.config.mjs && esbuild src/hash.ts src/deck.ts src/settings.ts src/schedule.ts src/drip.ts src/pick.ts src/store.ts --bundle --format=esm --outdir=.testbuild --out-extension:.js=.mjs --platform=node --log-level=warning && node --test test/*.test.mjs",
+    "test": "node esbuild.config.mjs && esbuild src/hash.ts src/deck.ts src/settings.ts src/schedule.ts src/drip.ts src/pick.ts src/store.ts src/answer.ts --bundle --format=esm --outdir=.testbuild --out-extension:.js=.mjs --platform=node --log-level=warning && node --test test/*.test.mjs",
     "install-local": "node esbuild.config.mjs && node install.mjs"
   },
   "devDependencies": {
