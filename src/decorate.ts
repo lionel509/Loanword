@@ -48,8 +48,10 @@ export function swapPlugin(ctx: SwapContext) {
 
       update(u: ViewUpdate) {
         const refresh = u.transactions.some((t) => t.effects.some((e) => e.is(refreshSwaps)));
-        const redraw = refresh || u.docChanged || u.selectionSet || u.viewportChanged || u.focusChanged;
-        if (redraw) this.compute(u.view, u.docChanged || refresh, false);
+        const modeFlip = u.startState.field(editorLivePreviewField, false) !== u.state.field(editorLivePreviewField, false);
+        // Skip ranges are rebuilt on every update: the background parser and the
+        // Live Preview toggle arrive as effects-only transactions.
+        this.compute(u.view, u.docChanged || refresh || modeFlip, false);
       }
 
       compute(view: EditorView, repick: boolean, first: boolean) {
