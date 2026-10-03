@@ -16,8 +16,15 @@ const rows = [
   ["mountian", "mountain", true],
   ["mountains", "mountain", true],
   ["word", "speech, words", true],
-  // "days" is under 5 letters, so only a stem on the meaning side can accept it (tolerance can't).
+  // "days" is too short for typo tolerance, so only a stem on the meaning side can accept it.
   ["day", "days", true],
+  // Tolerance starts at 6 letters: at 5, deck meanings and common words are one edit apart.
+  ["mouth", "moon, month", false],
+  ["month", "mouth", false],
+  ["woods", "speech, words", false],
+  ["honey", "money", false],
+  // "days" against "day" is 4 letters, so only a stem on the typed side accepts it.
+  ["days", "sun, day", true],
   // "s" stems to "", so only the empty-answer guard rejects an empty string here.
   ["", "s", false],
   ["son", "sun, day", false],

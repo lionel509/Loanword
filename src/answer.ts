@@ -20,5 +20,5 @@ export function withinOne(a: string, b: string): boolean {
 export function checkAnswer(typed: string, meaning: string): boolean {
   const t = norm(typed);
   if (!t) return false;
-  return alternatives(meaning).some((m) => t === m || stem(t) === stem(m) || (m.length >= 5 && withinOne(t, m)));
+  return alternatives(meaning).some((m) => t === m || stem(t) === stem(m) || (m.length >= 6 && withinOne(t, m)));
 }
