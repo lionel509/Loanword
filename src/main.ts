@@ -92,7 +92,7 @@ export default class LoanwordPlugin extends Plugin {
       },
     })]);
 
-    this.registerDomEvent(window, "focus", () => this.onStoreChange());
+    this.registerDomEvent(window, "focus", () => { this.lastKeyAt = Date.now(); this.onStoreChange(); });
     this.registerDomEvent(document, "keydown", () => { this.lastKeyAt = Date.now(); }, true);
     this.registerInterval(window.setInterval(() => this.tick(), TICK_MS));
     this.registerInterval(window.setInterval(() => this.onStoreChange(), 60_000));
@@ -195,7 +195,7 @@ export default class LoanwordPlugin extends Plugin {
     return true;
   }
 
-  // ---- the daily prompt -----------------------------------------------------
+  // ---- drips -----------------------------------------------------
 
   private armFirstDrip() {
     const now = Date.now(), first = now + this.cfg.firstDripMinutes * 60e3;
@@ -205,6 +205,7 @@ export default class LoanwordPlugin extends Plugin {
   private tick() {
     const s = this.store?.state;
     if (!s || this.modal || Date.now() < s.drip.next) return;
+    if (!document.hasFocus() || Date.now() - this.lastKeyAt < this.cfg.idleSeconds * 1000 || this.paused() || QuizPopover.current) return;
     void this.maybePrompt(false);
   }
 
@@ -225,6 +226,7 @@ export default class LoanwordPlugin extends Plugin {
     if (claimedElsewhere()) return "Loanword: review is open in another window";
     if (!force) await new Promise((r) => window.setTimeout(r, Math.random() * 1500));
     if (this.unloaded || !this.store || this.modal) return null;
+    if (!force && (!document.hasFocus() || Date.now() - this.lastKeyAt < this.cfg.idleSeconds * 1000 || QuizPopover.current)) return null;
     // Compare-and-set (R4): re-check inside the claiming write; the file's claim wins.
     let allowed = false;
     store.update((st) => {
@@ -250,6 +252,7 @@ export default class LoanwordPlugin extends Plugin {
     this.heartbeat = window.setInterval(() => {
       store.update((st) => { if (st.prompt?.owner === this.instanceId) { st.prompt.at = Date.now(); st.prompt.day = this.today(); } });
     }, HEARTBEAT);
+    QuizPopover.current?.close();
     this.modal.open();
     return null;
   }
@@ -307,7 +310,7 @@ export default class LoanwordPlugin extends Plugin {
     this.endModal();
     this.store?.update((s) => {
       if (s.prompt?.owner === this.instanceId) s.prompt = null;
-      s.drip = { next: Date.now() + DISMISS_MS, at: Date.now() };
+      s.drip = { next: Math.max(s.drip.next, Date.now() + DISMISS_MS), at: Date.now() };
     });
     this.refreshAll();
   }
@@ -325,8 +328,7 @@ export default class LoanwordPlugin extends Plugin {
       this.refreshAll();
       return;
     }
-    // ponytail: close on "claim no longer mine" rather than on isDone, since requeued
-    // wrong cards make the store read done while this window's modal is still asking.
+    // ponytail: a drip's last grade can leave the store done while this window's modal is still open
     if (this.modal && this.store.state.prompt?.owner !== this.instanceId) {
       const m = this.modal;
       this.endModal();
@@ -420,7 +422,8 @@ class LoanwordSettingTab extends PluginSettingTab {
       new Setting(containerEl).setName(name).setDesc(desc)
         .addText((t) => t.setValue(String(p.cfg[key])).onChange(async (v) => {
           const n = Number(v);
-          if (!Number.isFinite(n) || n < 0) return;
+          const min = key === "dripMin" || key === "dripMax" || key === "cardsPerDrip" || key === "idleSeconds" || key === "firstDripMinutes" ? 1 : 0;
+          if (!Number.isFinite(n) || n < min) return;
           p.cfg[key] = Math.floor(n);
           await p.saveSettings();
         }));
