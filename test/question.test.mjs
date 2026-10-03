@@ -56,3 +56,20 @@ test("A1: near-duplicate meanings are never distractors", () => {
     assert.ok(!q.options.includes("water (radical)"), String(s));
   }
 });
+
+test("R5: own-side compare uses the base meaning", () => {
+  const d = [card("氵", "water (radical)"), card("水", "water"), card("山", "mountain"), card("江", "river")];
+  for (let s = 0; s < 100; s++) {
+    const q = makeQuestion(d[0], d, s);
+    const others = q.options.filter((_, i) => i !== q.answer);
+    assert.ok(!others.some((o) => baseMeaning(o) === "water"), String(s));
+  }
+});
+
+test("R5: option base meanings are pairwise distinct", () => {
+  const d = [card("山", "mountain"), card("水", "water"), card("氵", "water (radical)"), card("江", "river")];
+  for (let s = 0; s < 100; s++) {
+    const q = makeQuestion(d[0], d, s);
+    assert.equal(new Set(q.options.map(baseMeaning)).size, q.options.length, String(s));
+  }
+});
