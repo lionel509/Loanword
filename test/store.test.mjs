@@ -13,19 +13,20 @@ test("mergeProgress", () => {
   const file = { ...clone(EMPTY),
     items: { a: rec(5, 1), b: rec(9, 3) },
     days: { d: { introduced: ["x", "y"], reviews: 2 } },
-    snooze: { until: 100, at: 10 }, pause: { until: "", at: 1 },
+    drip: { next: 100, at: 10 }, pause: { until: "", at: 1 },
     prompt: { day: "d", owner: "f", at: 1 } };
   const mem = { ...clone(EMPTY),
     items: { a: rec(9, 2), b: rec(5, 1), c: rec(1) },
     days: { d: { introduced: ["z", "x"], reviews: 5 } },
-    snooze: { until: 50, at: 20 }, pause: { until: "2026-10-09", at: 2 },
+    drip: { next: 50, at: 20 }, pause: { until: "2026-10-09", at: 2 },
     prompt: { day: "d", owner: "m", at: 9 } };
   const m = mergeProgress(file, mem);
   assert.equal(m.items.a.updated, 9);
   assert.equal(m.items.b.updated, 9);
   assert.ok(m.items.c);
   assert.deepEqual(m.days.d, { introduced: ["x", "y", "z"], reviews: 5 });
-  assert.deepEqual(m.snooze, { until: 50, at: 20 });
+  assert.deepEqual(m.drip, { next: 50, at: 20 });
+  assert.deepEqual(mergeProgress(file, { ...mem, drip: { next: 50, at: 5 } }).drip, file.drip);
   assert.deepEqual(m.pause, { until: "2026-10-09", at: 2 });
   assert.deepEqual(m.prompt, file.prompt);
   assert.equal(mergeProgress({ ...file, prompt: null }, mem).prompt, null);
@@ -78,4 +79,15 @@ test("R10: wrong-shaped file is set aside, memory kept", () => {
   assert.doesNotThrow(() => s.load());
   assert.ok(s.state.items.keep);
   assert.ok(readdirSync(join(f, "..")).some((n) => n.startsWith("progress.json.corrupt-")));
+});
+
+test("v1 file without drip or notBefore loads unchanged", () => {
+  const f = tmp();
+  writeFileSync(f, '{"version":1,"items":{"a":{"box":2,"due":"2026-10-03","seen":1,"right":1,"wrong":0,"updated":5}},"days":{},"snooze":{"until":0,"at":0},"pause":{"until":"","at":0},"prompt":null}');
+  const s = new Store(f);
+  s.load();
+  assert.deepEqual(s.state.drip, { next: 0, at: 0 });
+  assert.equal(s.state.items.a.notBefore, undefined);
+  assert.ok(!("snooze" in s.state));
+  assert.ok(!readdirSync(join(f, "..")).some((n) => n.startsWith("progress.json.corrupt-")));
 });

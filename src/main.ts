@@ -211,9 +211,9 @@ export default class LoanwordPlugin extends Plugin {
     const today = this.today();
     if (this.paused()) return `Loanword: paused until ${s.pause.until}`;
     if (isDone(this.session())) return "Loanword: done for today ✓";
-    if (!force && s.snooze.until > now) {
+    if (!force && s.drip.next > now) {
       if (this.snoozeTimer !== null) window.clearTimeout(this.snoozeTimer);
-      this.snoozeTimer = window.setTimeout(() => void this.maybePrompt(false), s.snooze.until - now + 500);
+      this.snoozeTimer = window.setTimeout(() => void this.maybePrompt(false), s.drip.next - now + 500);
       return null;
     }
     const claimedElsewhere = () => {
@@ -226,7 +226,7 @@ export default class LoanwordPlugin extends Plugin {
     // Compare-and-set: the file's claim wins; only write ours if it is still free.
     let allowed = false;
     store.update((st) => {
-      allowed = force || (st.snooze.until <= Date.now() && !(st.pause.until >= today));
+      allowed = force || (st.drip.next <= Date.now() && !(st.pause.until >= today));
       if (allowed && !claimedElsewhere()) st.prompt = { day: today, owner: this.instanceId, at: Date.now() };
     });
     if (!allowed) return null;
@@ -280,7 +280,7 @@ export default class LoanwordPlugin extends Plugin {
     this.endModal();
     this.store?.update((s) => {
       if (s.prompt?.owner === this.instanceId) s.prompt = null;
-      s.snooze = { until: 0, at: Date.now() };
+      s.drip = { next: 0, at: Date.now() };
     });
     this.refreshAll();
   }
@@ -290,7 +290,7 @@ export default class LoanwordPlugin extends Plugin {
     const now = Date.now();
     this.store?.update((s) => {
       if (s.prompt?.owner === this.instanceId) s.prompt = null;
-      s.snooze = { until: now + SNOOZE, at: now };
+      s.drip = { next: now + SNOOZE, at: now };
     });
     this.refreshAll();
     void this.maybePrompt(false);   // schedules the timer for the snooze end

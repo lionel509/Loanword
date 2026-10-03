@@ -10,8 +10,8 @@ export interface Progress {
   items: Record<string, Rec>;
   /** key = dayKey. */
   days: Record<string, { introduced: string[]; reviews: number }>;
-  /** ms epoch; until 0 = none. */
-  snooze: { until: number; at: number };
+  /** ms epoch of the next drip; merges by greater at */
+  drip: { next: number; at: number };
   /** dayKey or ""; paused iff until >= today. */
   pause: { until: string; at: number };
   /** The modal claim; owner = `${process.pid}-${random6}`. */
@@ -20,11 +20,17 @@ export interface Progress {
 
 export const EMPTY: Progress = {
   version: 1, items: {}, days: {},
-  snooze: { until: 0, at: 0 }, pause: { until: "", at: 0 }, prompt: null,
+  drip: { next: 0, at: 0 }, pause: { until: "", at: 0 }, prompt: null,
 };
 
 const fresh = (): Progress => JSON.parse(JSON.stringify(EMPTY));
 
+/**
+ * Migration for old progress.json: none needed. version stays 1; notBefore is optional and a
+ * missing one reads as 0 (always askable); old files have no drip, so { ...fresh(), ...file }
+ * supplies { next: 0, at: 0 } and the boot rule arms it; the old snooze key is not in the
+ * returned object, so it is dropped on the next write; old files contain no box-0 records.
+ */
 /** File wins on the claim; everything else is last-writer-wins per entry. */
 export function mergeProgress(file: Progress, mem: Progress): Progress {
   const f = { ...fresh(), ...file };
@@ -42,7 +48,7 @@ export function mergeProgress(file: Progress, mem: Progress): Progress {
   }
   return {
     version: 1, items, days,
-    snooze: mem.snooze.at > f.snooze.at ? mem.snooze : f.snooze,
+    drip: mem.drip.at > f.drip.at ? mem.drip : f.drip,
     pause: mem.pause.at > f.pause.at ? mem.pause : f.pause,
     prompt: f.prompt,
   };
@@ -59,7 +65,7 @@ export class Store {
     let parsed: Progress | null = null;
     try { parsed = JSON.parse(text); } catch { parsed = null; }
     const obj = (v: unknown) => typeof v === "object" && v !== null;
-    if (!obj(parsed) || !(["items", "days", "snooze", "pause"] as const).every((k) => parsed![k] === undefined || obj(parsed![k]))) {
+    if (!obj(parsed) || !(["items", "days", "drip", "pause"] as const).every((k) => parsed![k] === undefined || obj(parsed![k]))) {
       // Another window may have set it aside first.
       try { renameSync(this.file, `${this.file}.corrupt-${Date.now()}`); } catch { /* already moved */ }
       return this.state;
