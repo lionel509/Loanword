@@ -13,7 +13,7 @@ const ROWS = [
   "| 火 | huǒ | 불 | 火 | | fire |",
 ];
 const note = (rows, fm = "---\nunit: 1\n---\n") =>
-  `${fm}# Deck\n\nSome prose here.\n\n${HEAD}\n${rows.join("\n")}\n\nMore prose.\n| not | a | table |\n`;
+  `${fm}# Deck\n\nSome prose here.\n\n${HEAD}\n${rows.join("\n")}\n\nMore prose.\n| a | b | c | d | e | f |\n`;
 
 test("fixture yields exactly the six cards", () => {
   const cards = parseDeckNote(note(ROWS), 0);
