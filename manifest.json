@@ -1,0 +1,10 @@
+{
+  "id": "loanword",
+  "name": "Loanword",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Daily Korean/Chinese review that comes to you, and a few words in your notes swapped for their 中文/한글 forms. Offline, Leitner, never edits a note.",
+  "author": "lionel509",
+  "authorUrl": "https://github.com/lionel509",
+  "isDesktopOnly": true
+}

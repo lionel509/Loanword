@@ -2,3 +2,5 @@ node_modules/
 main.js
 *.log
 graphify-out/
+.testbuild/
+.DS_Store
