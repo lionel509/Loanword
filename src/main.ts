@@ -7,12 +7,11 @@ import { mkdirSync, readFileSync, readdirSync, statSync, watch, type FSWatcher }
 import { isAbsolute, join, relative } from "node:path";
 import { parseDeck, type Card } from "./deck";
 import { refreshSwaps, swapPlugin } from "./decorate";
-import { fnv1a } from "./hash";
+import { pickDrip } from "./drip";
 import { ReviewModal } from "./modal";
 import { buildLexicon, type Lexicon } from "./pick";
-import { makeQuestion } from "./question";
 import { QuizPopover } from "./quiz-ui";
-import { addDays, buildSession, dayKey, grade, isDone, type Mode, type Session } from "./schedule";
+import { addDays, buildSession, dayKey, grade, isDone, meet, type Mode, type Session } from "./schedule";
 import { DEFAULT_SETTINGS, forbiddenPath, isExcluded, type LoanwordSettings } from "./settings";
 import { Store } from "./store";
 import { ProgressView, VIEW_TYPE } from "./view";
@@ -89,11 +88,7 @@ export default class LoanwordPlugin extends Plugin {
       settings: () => this.cfg,
       allowed: (path) => this.allowed(path),
       onClick: (card, rect) => {
-        const today = this.today();
-        new QuizPopover(rect).open(
-          makeQuestion(card, this.deck, fnv1a(card.id + "|" + today)),
-          (right) => this.onAnswer(card, right, "note"),
-        );
+        new QuizPopover(rect).open(card, (r) => this.onAnswer(card, r === "know", "note"));
       },
     })]);
 
@@ -234,13 +229,11 @@ export default class LoanwordPlugin extends Plugin {
 
     const session = this.session();
     if (isDone(session)) { this.releaseClaim(); return "Loanword: done for today ✓"; }
-    const items = store.state.items;
     this.modal = new ReviewModal(
-      this.app, [...session.due, ...session.fresh], this.deck, today,
-      (card) => !items[card.id],
-      (card, right) => this.onAnswer(card, right, "review"),
+      this.app, pickDrip(session, Infinity),
+      (card, r) => r === "met" ? this.onMeet(card) : this.onAnswer(card, r === "know", "review"),
       () => this.onFinish(),
-      () => this.onSnooze(),
+      () => this.onDismiss(),
     );
     this.heartbeat = window.setInterval(() => {
       store.update((st) => { if (st.prompt?.owner === this.instanceId) { st.prompt.at = Date.now(); st.prompt.day = this.today(); } });
@@ -270,6 +263,17 @@ export default class LoanwordPlugin extends Plugin {
     this.refreshAll();
   }
 
+  onMeet(card: Card) {
+    if (!this.store) return;
+    const today = this.today(), now = Date.now();
+    this.store.update((s) => {
+      if (s.items[card.id]) return;
+      s.items[card.id] = meet(now, today);
+      (s.days[today] ??= { introduced: [], reviews: 0 }).introduced.push(card.id);
+    });
+    this.refreshAll();
+  }
+
   private endModal() {
     this.modal = null;
     if (this.heartbeat !== null) window.clearInterval(this.heartbeat);
@@ -285,7 +289,7 @@ export default class LoanwordPlugin extends Plugin {
     this.refreshAll();
   }
 
-  onSnooze() {
+  onDismiss() {
     this.endModal();
     const now = Date.now();
     this.store?.update((s) => {
