@@ -19,3 +19,12 @@ export const DEFAULT_SETTINGS: LoanwordSettings = {
   swapsEnabled: true,
   excludedFolders: [],
 };
+
+/** Ghostwriter's blockedFolders rule, case-insensitive, trailing slash optional. */
+export function isExcluded(path: string, folders: string[]): boolean {
+  const p = path.toLowerCase();
+  return folders.some((f) => {
+    const dir = f.trim().replace(/\/+$/, "").toLowerCase();
+    return !!dir && (p === dir || p.startsWith(dir + "/"));
+  });
+}
