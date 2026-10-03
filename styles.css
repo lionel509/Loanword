@@ -33,3 +33,6 @@
 .loanword-pop { width: 280px; }
 .loanword-pop .loanword-quiz .loanword-prompt { font-size: 44px; }
 .loanword-quiz .loanword-next:focus, .loanword-quiz .loanword-next:focus-visible { box-shadow: none !important; outline: none; border-color: var(--interactive-accent-text, var(--interactive-accent)) !important; }
+/* The meaning is the answer he grades himself against, so it leads the reveal. */
+.loanword-quiz .loanword-reveal .loanword-meaning { order: -1; font-size: 1.35em; font-weight: 600; color: var(--text-normal); }
+.loanword-quiz .loanword-reveal .loanword-reading { font-size: 1.25em; }

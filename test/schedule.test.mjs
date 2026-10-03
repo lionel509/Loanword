@@ -135,6 +135,9 @@ test("buildSession gates on notBefore and reports waitUntil", () => {
   const s4 = buildSession(deck.filter((c) => one[c.id]), one, five, T, 200, 5);
   assert.deepEqual(s4.due.map((c) => c.id), ["zh:1"]);
   assert.equal(s4.waitUntil, 0);
+  // The earliest future notBefore sits after a later one in deck order, so a first-seen pick reads 300, not 200.
+  const order = { "zh:1": rec({ due: T, notBefore: 300 }), "zh:2": rec({ due: T, notBefore: 200 }) };
+  assert.equal(buildSession(deck, order, five, T, 100, 5).waitUntil, 200);
 });
 
 test("tally", () => {
