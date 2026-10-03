@@ -286,6 +286,12 @@ export default class LoanwordPlugin extends Plugin {
   onStoreChange() {
     if (!this.store) return;
     this.store.load();
+    if (this.paused()) {   // a pause from any window closes the review here too
+      if (this.modal) { const m = this.modal; this.endModal(); m.closeSilently(); }
+      if (this.store.state.prompt?.owner === this.instanceId) this.releaseClaim();
+      this.refreshAll();
+      return;
+    }
     // ponytail: close on "claim no longer mine" rather than on isDone, since requeued
     // wrong cards make the store read done while this window's modal is still asking.
     if (this.modal && this.store.state.prompt?.owner !== this.instanceId) {
