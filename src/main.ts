@@ -35,6 +35,8 @@ export default class LoanwordPlugin extends Plugin {
   private deckWatcher: FSWatcher | null = null;
   private deckTimer: number | null = null;
   private warnedNoDeck = false;
+  private bootTimer: number | null = null;
+  private unloaded = false;
 
   async onload() {
     this.cfg = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -101,6 +103,7 @@ export default class LoanwordPlugin extends Plugin {
   }
 
   onunload() {
+    this.unloaded = true;
     this.stopWatchers();
     this.clearTimers();
     this.modal?.closeSilently();
@@ -150,7 +153,8 @@ export default class LoanwordPlugin extends Plugin {
       if (this.deckTimer !== null) window.clearTimeout(this.deckTimer);
       this.deckTimer = window.setTimeout(() => { this.loadDeck(); this.refreshAll(); }, 500);
     });
-    window.setTimeout(() => void this.maybePrompt(false), 1500);
+    if (this.bootTimer !== null) window.clearTimeout(this.bootTimer);
+    this.bootTimer = window.setTimeout(() => { this.bootTimer = null; void this.maybePrompt(false); }, 1500);
     this.refreshAll();
   }
 
@@ -163,8 +167,8 @@ export default class LoanwordPlugin extends Plugin {
 
   private clearTimers() {
     for (const t of [this.heartbeat]) if (t !== null) window.clearInterval(t);
-    for (const t of [this.snoozeTimer, this.deckTimer]) if (t !== null) window.clearTimeout(t);
-    this.heartbeat = this.snoozeTimer = this.deckTimer = null;
+    for (const t of [this.snoozeTimer, this.deckTimer, this.bootTimer]) if (t !== null) window.clearTimeout(t);
+    this.heartbeat = this.snoozeTimer = this.deckTimer = this.bootTimer = null;
   }
 
   loadDeck() {
@@ -217,6 +221,7 @@ export default class LoanwordPlugin extends Plugin {
     };
     if (claimedElsewhere()) return;
     if (!force) await new Promise((r) => window.setTimeout(r, Math.random() * 1500));
+    if (this.unloaded || !this.store) return;
     if (this.modal) return;
     // Compare-and-set: the file's claim wins; only write ours if it is still free.
     let allowed = false;
