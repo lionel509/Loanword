@@ -6,6 +6,7 @@ test("defaults", () => {
   assert.deepEqual(DEFAULT_SETTINGS, {
     deckPath: "", newPerDay: 5, swapEvery: 60, maxSwapsPerNote: 12,
     swapScript: "both", swapsEnabled: true, excludedFolders: [],
+    dripMin: 30, dripMax: 75, cardsPerDrip: 3, idleSeconds: 10, firstDripMinutes: 2,
   });
   assert.ok(!JSON.stringify(DEFAULT_SETTINGS).includes("/Users/"));
 });

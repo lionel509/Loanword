@@ -8,6 +8,12 @@ export interface LoanwordSettings {
   swapsEnabled: boolean;
   /** Vault-relative, case-insensitive prefix match. */
   excludedFolders: string[];
+  /** Minutes between drips, drawn from [dripMin, dripMax]. */
+  dripMin: number;
+  dripMax: number;
+  cardsPerDrip: number;
+  idleSeconds: number;
+  firstDripMinutes: number;
 }
 
 export const DEFAULT_SETTINGS: LoanwordSettings = {
@@ -18,6 +24,11 @@ export const DEFAULT_SETTINGS: LoanwordSettings = {
   swapScript: "both",
   swapsEnabled: true,
   excludedFolders: [],
+  dripMin: 30,
+  dripMax: 75,
+  cardsPerDrip: 3,
+  idleSeconds: 10,
+  firstDripMinutes: 2,
 };
 
 /** Ghostwriter's blockedFolders rule, case-insensitive, trailing slash optional. */
