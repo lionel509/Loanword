@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { makeQuestion, baseMeaning } from "../.testbuild/question.mjs";
+import { makeQuestion, baseMeaning, displayMeaning } from "../.testbuild/question.mjs";
 
 let n = 0;
 const card = (form, meaning, unit = 1) => ({ id: `zh:${form}`, script: "zh", form, meaning, unit, order: n++, swap: [] });
@@ -72,4 +72,9 @@ test("R5: option base meanings are pairwise distinct", () => {
     const q = makeQuestion(d[0], d, s);
     assert.equal(new Set(q.options.map(baseMeaning)).size, q.options.length, String(s));
   }
+});
+
+test("displayMeaning strips the parenthetical, keeps case", () => {
+  assert.equal(displayMeaning("exit (Chinese also: export)"), "exit");
+  assert.equal(displayMeaning("Monday"), "Monday");
 });

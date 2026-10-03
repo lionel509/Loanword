@@ -8,6 +8,11 @@ export function baseMeaning(m: string): string {
   return m.replace(/\s*\(.*$/, "").trim().toLowerCase();
 }
 
+/** Option label: the meaning without its parenthetical, case kept. */
+export function displayMeaning(m: string): string {
+  return m.replace(/\s*\(.*$/, "").trim();
+}
+
 /** One meaning per distinct base meaning, excluding the card's own. */
 function distinct(cards: Card[], own: string): string[] {
   const seen = new Set([own]);
