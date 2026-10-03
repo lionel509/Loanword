@@ -16,6 +16,10 @@ const rows = [
   ["mountian", "mountain", true],
   ["mountains", "mountain", true],
   ["word", "speech, words", true],
+  // "days" is under 5 letters, so only a stem on the meaning side can accept it (tolerance can't).
+  ["day", "days", true],
+  // "s" stems to "", so only the empty-answer guard rejects an empty string here.
+  ["", "s", false],
   ["son", "sun, day", false],
   ["fire", "fire", true],
   ["five", "fire", false],
