@@ -1,0 +1,6 @@
+.loanword-swap { border-bottom: 1px dotted var(--interactive-accent); cursor: pointer; }
+.loanword-pop { background: var(--background-secondary); color: var(--text-normal); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); box-shadow: var(--shadow-s); padding: var(--size-4-3); z-index: var(--layer-popover); position: fixed; }
+.loanword-prompt { font-size: 2.4em; text-align: center; }
+.loanword-options button.is-right { color: var(--text-success); }
+.is-wrong { color: var(--text-error); }
+.loanword-status.is-due { color: var(--interactive-accent); }

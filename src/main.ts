@@ -1,5 +1,408 @@
-import { Plugin } from "obsidian";
+import {
+  App, FileSystemAdapter, MarkdownView, Notice, Plugin, PluginSettingTab, Setting,
+} from "obsidian";
+import type { EditorView } from "@codemirror/view";
+import { syntaxTree } from "@codemirror/language";
+import { mkdirSync, readFileSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs";
+import { isAbsolute, join, relative } from "node:path";
+import { parseDeck, type Card } from "./deck";
+import { refreshSwaps, swapPlugin } from "./decorate";
+import { fnv1a } from "./hash";
+import { ReviewModal } from "./modal";
+import { buildLexicon, type Lexicon } from "./pick";
+import { makeQuestion } from "./question";
+import { QuizPopover } from "./quiz-ui";
+import { addDays, buildSession, dayKey, grade, isDone, type Mode, type Session } from "./schedule";
+import { DEFAULT_SETTINGS, isExcluded, type LoanwordSettings } from "./settings";
+import { Store } from "./store";
+import { ProgressView, VIEW_TYPE } from "./view";
+
+const CLAIM_TTL = 90_000;
+const HEARTBEAT = 30_000;
+const SNOOZE = 3_600_000;
 
 export default class LoanwordPlugin extends Plugin {
-  async onload() {}
+  cfg: LoanwordSettings = { ...DEFAULT_SETTINGS };
+  readonly instanceId = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+  store: Store | null = null;
+  deck: Card[] = [];
+  lexicon: Lexicon = {};
+  private statusEl!: HTMLElement;
+  private modal: ReviewModal | null = null;
+  private heartbeat: number | null = null;
+  private snoozeTimer: number | null = null;
+  private stopStore: (() => void) | null = null;
+  private deckWatcher: FSWatcher | null = null;
+  private deckTimer: number | null = null;
+  private warnedNoDeck = false;
+  private hooked = false;
+
+  async onload() {
+    this.cfg = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.addSettingTab(new LoanwordSettingTab(this.app, this));
+    this.registerView(VIEW_TYPE, (leaf) => new ProgressView(leaf, {
+      review: () => void this.maybePrompt(true),
+      pause: (d) => this.pause(d),
+      resume: () => this.resume(),
+    }, () => this.refreshAll()));
+    this.addRibbonIcon("languages", "Loanword progress", () => void this.openSidebar());
+    this.statusEl = this.addStatusBarItem();
+    this.statusEl.addClass("loanword-status");
+    this.registerDomEvent(this.statusEl, "click", () => {
+      if (this.store && !isDone(this.session())) void this.maybePrompt(true);
+      else void this.openSidebar();
+    });
+
+    this.addCommand({ id: "review-now", name: "Review now", callback: () => void this.maybePrompt(true) });
+    this.addCommand({ id: "open-progress", name: "Open progress", callback: () => void this.openSidebar() });
+    this.addCommand({ id: "pause-today", name: "Pause for today", callback: () => this.pause(1) });
+    this.addCommand({ id: "pause-7-days", name: "Pause for 7 days", callback: () => this.pause(7) });
+    this.addCommand({ id: "resume", name: "Resume", callback: () => this.resume() });
+    this.addCommand({
+      id: "toggle-swaps-here", name: "Toggle swaps in this vault",
+      callback: async () => {
+        this.cfg.swapsEnabled = !this.cfg.swapsEnabled;
+        await this.saveSettings();
+        new Notice(`Loanword swaps ${this.cfg.swapsEnabled ? "on" : "off"} in this vault`);
+      },
+    });
+    this.addCommand({ id: "reload-deck", name: "Reload deck", callback: () => { this.loadDeck(); this.refreshAll(); } });
+    this.addCommand({
+      id: "log-syntax-nodes", name: "Log syntax nodes on the cursor line",
+      editorCallback: (editor) => {
+        // ponytail: editor.cm is undocumented; this is a dev command
+        const cm = (editor as unknown as { cm?: EditorView }).cm;
+        if (!cm) return;
+        const line = cm.state.doc.lineAt(cm.state.selection.main.head);
+        let n = 0;
+        syntaxTree(cm.state).iterate({
+          from: line.from, to: line.to,
+          enter: (node) => { n++; console.log(node.type.name, JSON.stringify(cm.state.doc.sliceString(node.from, node.to))); },
+        });
+        new Notice(`Loanword: ${n} syntax nodes logged to the console`);
+      },
+    });
+
+    this.registerEditorExtension([swapPlugin({
+      lexicon: () => this.lexicon,
+      settings: () => this.cfg,
+      allowed: (path) => this.allowed(path),
+      onClick: (card, rect) => {
+        const today = this.today();
+        new QuizPopover(rect).open(
+          makeQuestion(card, this.deck, fnv1a(card.id + "|" + today)),
+          (right) => this.onAnswer(card, right, "note"),
+        );
+      },
+    })]);
+
+    this.app.workspace.onLayoutReady(() => this.boot());
+  }
+
+  onunload() {
+    this.stopWatchers();
+    this.clearTimers();
+    this.modal?.closeSilently();
+    this.releaseClaim();
+  }
+
+  today() { return dayKey(Date.now()); }
+
+  session(): Session {
+    const s = this.store?.state;
+    const today = this.today();
+    return buildSession(this.deck, s?.items ?? {}, s?.days[today]?.introduced ?? [], today, this.cfg.newPerDay);
+  }
+
+  paused(): boolean {
+    return !!this.store && this.store.state.pause.until >= this.today();
+  }
+
+  // ---- wiring ---------------------------------------------------------------
+
+  boot() {
+    this.stopWatchers();
+    this.store = null;
+    this.deck = [];
+    const dir = this.cfg.deckPath;
+    let ok = false;
+    try { ok = !!dir && isAbsolute(dir) && statSync(dir).isDirectory(); } catch { ok = false; }
+    if (!ok) {
+      if (dir && !this.warnedNoDeck) new Notice(`Loanword: deck folder not found — ${dir}`);
+      this.warnedNoDeck = true;
+      this.refreshAll();
+      return;
+    }
+    mkdirSync(join(dir, ".loanword"), { recursive: true });
+    this.store = new Store(join(dir, ".loanword", "progress.json"));
+    this.store.load();
+    this.stopStore = this.store.watch(() => this.onStoreChange());
+    this.loadDeck();
+    this.deckWatcher = watch(dir, { persistent: false }, (_e, name) => {
+      if (!name || !String(name).endsWith(".md")) return;   // A2: ignore .loanword/ writes
+      if (this.deckTimer !== null) window.clearTimeout(this.deckTimer);
+      this.deckTimer = window.setTimeout(() => { this.loadDeck(); this.refreshAll(); }, 500);
+    });
+    if (!this.hooked) {   // boot() re-runs when the deck path changes; hook these once
+      this.hooked = true;
+      this.registerDomEvent(window, "focus", () => this.onStoreChange());
+      this.registerInterval(window.setInterval(() => void this.maybePrompt(false), 60_000));
+    }
+    window.setTimeout(() => void this.maybePrompt(false), 1500);
+    this.refreshAll();
+  }
+
+  private stopWatchers() {
+    this.stopStore?.();
+    this.stopStore = null;
+    this.deckWatcher?.close();
+    this.deckWatcher = null;
+  }
+
+  private clearTimers() {
+    for (const t of [this.heartbeat]) if (t !== null) window.clearInterval(t);
+    for (const t of [this.snoozeTimer, this.deckTimer]) if (t !== null) window.clearTimeout(t);
+    this.heartbeat = this.snoozeTimer = this.deckTimer = null;
+  }
+
+  loadDeck() {
+    const dir = this.cfg.deckPath;
+    try {
+      const notes = readdirSync(dir).filter((n) => n.endsWith(".md"))
+        .map((n) => ({ name: n, text: readFileSync(join(dir, n), "utf8") }));
+      this.deck = parseDeck(notes);
+    } catch {
+      this.deck = [];
+    }
+    this.rebuildLexicon();
+  }
+
+  private rebuildLexicon() {
+    const items = this.store?.state.items ?? {};
+    this.lexicon = buildLexicon(this.deck, (id) => !!items[id], this.cfg.swapScript);
+  }
+
+  allowed(path: string): boolean {
+    if (!this.cfg.swapsEnabled || !this.store || this.paused()) return false;
+    if (isExcluded(path, this.cfg.excludedFolders)) return false;
+    const adapter = this.app.vault.adapter;
+    if (adapter instanceof FileSystemAdapter) {
+      const rel = relative(adapter.getBasePath(), this.cfg.deckPath);
+      if (rel && !rel.startsWith("..") && !isAbsolute(rel) && isExcluded(path, [rel])) return false;
+    }
+    return true;
+  }
+
+  // ---- the daily prompt -----------------------------------------------------
+
+  async maybePrompt(force: boolean) {
+    const store = this.store;
+    if (!store || !this.deck.length || this.modal) return;
+    store.load();
+    const s = store.state;
+    const now = Date.now();
+    const today = this.today();
+    if (this.paused()) return;
+    if (isDone(this.session())) return;
+    if (!force && s.snooze.until > now) {
+      if (this.snoozeTimer !== null) window.clearTimeout(this.snoozeTimer);
+      this.snoozeTimer = window.setTimeout(() => void this.maybePrompt(false), s.snooze.until - now + 500);
+      return;
+    }
+    const claimedElsewhere = () => {
+      const p = store.state.prompt;
+      return !!p && p.day === today && p.owner !== this.instanceId && Date.now() - p.at < CLAIM_TTL;
+    };
+    if (claimedElsewhere()) return;
+    if (!force) await new Promise((r) => window.setTimeout(r, Math.random() * 1500));
+    if (this.modal) return;
+    // Compare-and-set: the file's claim wins; only write ours if it is still free.
+    store.update((st) => {
+      if (!claimedElsewhere()) st.prompt = { day: today, owner: this.instanceId, at: Date.now() };
+    });
+    if (store.state.prompt?.owner !== this.instanceId) return;
+
+    const session = this.session();
+    if (isDone(session)) { this.releaseClaim(); return; }
+    const items = store.state.items;
+    this.modal = new ReviewModal(
+      this.app, [...session.due, ...session.fresh], this.deck, today,
+      (card) => !items[card.id],
+      (card, right) => this.onAnswer(card, right, "review"),
+      () => this.onFinish(),
+      () => this.onSnooze(),
+    );
+    this.heartbeat = window.setInterval(() => {
+      store.update((st) => { if (st.prompt?.owner === this.instanceId) st.prompt.at = Date.now(); });
+    }, HEARTBEAT);
+    this.modal.open();
+  }
+
+  onAnswer(card: Card, right: boolean, mode: Mode) {
+    if (!this.store) return;
+    const today = this.today();
+    this.store.update((s) => {
+      const had = !!s.items[card.id];
+      s.items[card.id] = grade(s.items[card.id], right, mode, today, Date.now());
+      const d = (s.days[today] ??= { introduced: [], reviews: 0 });
+      if (!had) d.introduced.push(card.id);
+      d.reviews++;
+    });
+    this.refreshAll();
+  }
+
+  private endModal() {
+    this.modal = null;
+    if (this.heartbeat !== null) window.clearInterval(this.heartbeat);
+    this.heartbeat = null;
+  }
+
+  onFinish() {
+    this.endModal();
+    this.store?.update((s) => {
+      if (s.prompt?.owner === this.instanceId) s.prompt = null;
+      s.snooze = { until: 0, at: Date.now() };
+    });
+    this.refreshAll();
+  }
+
+  onSnooze() {
+    this.endModal();
+    const now = Date.now();
+    this.store?.update((s) => {
+      if (s.prompt?.owner === this.instanceId) s.prompt = null;
+      s.snooze = { until: now + SNOOZE, at: now };
+    });
+    this.refreshAll();
+    void this.maybePrompt(false);   // schedules the timer for the snooze end
+  }
+
+  private releaseClaim() {
+    this.store?.update((s) => { if (s.prompt?.owner === this.instanceId) s.prompt = null; });
+  }
+
+  onStoreChange() {
+    if (!this.store) return;
+    this.store.load();
+    // ponytail: close on "claim no longer mine" rather than on isDone, since requeued
+    // wrong cards make the store read done while this window's modal is still asking.
+    if (this.modal && this.store.state.prompt?.owner !== this.instanceId) {
+      const m = this.modal;
+      this.endModal();
+      m.closeSilently();
+    }
+    this.refreshAll();
+  }
+
+  pause(days: number) {
+    if (!this.store) return;
+    const until = addDays(this.today(), days - 1);
+    this.store.update((s) => { s.pause = { until, at: Date.now() }; });
+    if (this.modal) { const m = this.modal; this.endModal(); m.closeSilently(); this.releaseClaim(); }
+    this.refreshAll();
+  }
+
+  resume() {
+    if (!this.store) return;
+    this.store.update((s) => { s.pause = { until: "", at: Date.now() }; });
+    this.refreshAll();
+  }
+
+  // ---- surfaces -------------------------------------------------------------
+
+  refreshAll() {
+    this.rebuildLexicon();
+    const today = this.today();
+    const el = this.statusEl;
+    if (el) {
+      el.removeClass("is-due");
+      if (!this.store) el.setText("Loanword: no deck");
+      else if (this.paused()) el.setText(`Loanword ⏸ until ${this.store.state.pause.until}`);
+      else {
+        const s = this.session();
+        if (isDone(s)) el.setText("Loanword ✓");
+        else { el.setText(`Loanword: ${s.due.length} due · ${s.fresh.length} new`); el.addClass("is-due"); }
+      }
+    }
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      if (leaf.view instanceof ProgressView) leaf.view.render(this.deck, this.store?.state ?? null, this.cfg, today);
+    }
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      // ponytail: editor.cm is undocumented; without it swaps refresh on the next keystroke
+      const cm = ((leaf.view as MarkdownView).editor as unknown as { cm?: EditorView })?.cm;
+      cm?.dispatch({ effects: refreshSwaps.of(null) });
+    }
+  }
+
+  async openSidebar() {
+    let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+    if (!leaf) {
+      const right = this.app.workspace.getRightLeaf(false);
+      if (!right) return;
+      await right.setViewState({ type: VIEW_TYPE, active: true });
+      leaf = right;
+    }
+    this.app.workspace.revealLeaf(leaf);
+    this.refreshAll();
+  }
+
+  async saveSettings() {
+    await this.saveData(this.cfg);
+    this.refreshAll();
+  }
+}
+
+class LoanwordSettingTab extends PluginSettingTab {
+  constructor(app: App, private plugin: LoanwordPlugin) { super(app, plugin); }
+
+  display() {
+    const { containerEl } = this;
+    const p = this.plugin;
+    containerEl.empty();
+
+    new Setting(containerEl)
+      .setName("Deck folder")
+      .setDesc("Absolute path to the folder of deck notes. Progress lives in a .loanword folder inside it.")
+      .addText((t) => t.setValue(p.cfg.deckPath).onChange(async (v) => {
+        p.cfg.deckPath = v.trim();
+        await p.saveSettings();
+        // ponytail: a new deck path needs a re-boot, not just a refresh
+        p.boot();
+      }));
+
+    const num = (name: string, desc: string, key: "newPerDay" | "swapEvery" | "maxSwapsPerNote") =>
+      new Setting(containerEl).setName(name).setDesc(desc)
+        .addText((t) => t.setValue(String(p.cfg[key])).onChange(async (v) => {
+          const n = Number(v);
+          if (!Number.isFinite(n) || n < 0) return;
+          p.cfg[key] = Math.floor(n);
+          await p.saveSettings();
+        }));
+    num("New cards per day", "How many unseen cards each day's review introduces.", "newPerDay");
+    num("Swap every", "Minimum words between two swapped words in a note.", "swapEvery");
+    num("Max swaps per note", "Upper bound on swapped words in one note.", "maxSwapsPerNote");
+
+    new Setting(containerEl)
+      .setName("Swap script")
+      .addDropdown((d) => d
+        .addOptions({ both: "Both", zh: "中文 only", ko: "한글 only" })
+        .setValue(p.cfg.swapScript)
+        .onChange(async (v) => { p.cfg.swapScript = v as LoanwordSettings["swapScript"]; await p.saveSettings(); }));
+
+    new Setting(containerEl)
+      .setName("Swaps in this vault")
+      .addToggle((t) => t.setValue(p.cfg.swapsEnabled).onChange(async (v) => {
+        p.cfg.swapsEnabled = v; await p.saveSettings();
+      }));
+
+    new Setting(containerEl)
+      .setName("Excluded folders")
+      .setDesc("One vault-relative path per line. No swaps inside these.")
+      .addTextArea((t) => t
+        .setValue(p.cfg.excludedFolders.join("\n"))
+        .onChange(async (v) => {
+          p.cfg.excludedFolders = v.split("\n").map((s) => s.trim()).filter(Boolean);
+          await p.saveSettings();
+        }));
+  }
 }
