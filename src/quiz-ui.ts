@@ -1,23 +1,25 @@
 /*
 DOM contract (stable class names):
-.loanword-quiz[data-kind="recall"|"meet"][data-state="ask"|"reveal"|"meet"]
-  .loanword-card
-    .loanword-lang       "Chinese" | "Korean" | "New · Chinese" | "New · Korean"
-    .loanword-prompt     the form, attr lang="zh-Hans"|"ko"
-    .loanword-hint       (ask only) "Say the meaning, then show the answer"
-  .loanword-reveal       (reveal and meet) .loanword-reading / .loanword-other / .loanword-meaning  — renderReveal unchanged
-  .loanword-options      (reveal only)
-    button.loanword-option.loanword-grade[data-grade="miss"] > .loanword-key "1" · .loanword-mark "✗" · .loanword-label "Missed"
-    button.loanword-option.loanword-grade[data-grade="know"] > .loanword-key "2" · .loanword-mark "✓" · .loanword-label "Knew it"
-  button.mod-cta.loanword-next   text "Show answer" (ask) | "Got it" (meet) | absent (reveal)
-Modal only: .loanword-progress > .loanword-progress-bar above; .loanword-foot > .loanword-hint + button.loanword-snooze "Later" below.
-Popover: .loanword-pop > div (the .loanword-quiz root), recall kind only.
+.loanword-quiz[data-kind="recall"|"meet"][data-state="ask"|"right"|"wrong"|"dontknow"|"meet"]
+  .loanword-card > .loanword-lang ("Chinese" | "Korean" | "New · Chinese" | "New · Korean") · .loanword-prompt[lang]
+  ask:      input.loanword-answer[type=text][placeholder="Type the meaning"][autocomplete=off][spellcheck=false]
+            .loanword-actions > button.loanword-option.loanword-dontknow "Don't know" · button.mod-cta.loanword-next "Check"
+  right | wrong | dontknow:
+            .loanword-verdict[data-verdict] "✓ Right" | "✗ You typed “<typed>”" | "The answer"
+            .loanword-reveal (renderReveal, unchanged)
+            wrong only: button.loanword-override "I was right"
+            button.mod-cta.loanword-next "Next"
+  meet:     .loanword-reveal · button.mod-cta.loanword-next "Got it"
+Modal only: .loanword-progress > .loanword-progress-bar; .loanword-foot > .loanword-hint + button.loanword-snooze "Later".
+Popover: .loanword-pop > div (the .loanword-quiz root), recall only.
 */
 import type { Card } from "./deck";
 import type { Kind } from "./drip";
+import { checkAnswer } from "./answer";
 
 export type Result = "miss" | "know" | "met";
-export interface Rendered { advance(): void; grade(right: boolean): void }
+export type State = "ask" | "right" | "wrong" | "dontknow" | "meet";
+export interface Rendered { enter(): void; pending(): Result | null }
 
 const langOf = (script: Card["script"]) => (script === "zh" ? "zh-Hans" : "ko");
 
@@ -39,16 +41,27 @@ function renderReveal(el: HTMLElement, c: Card) {
   box.createDiv({ cls: "loanword-meaning", text: c.meaning });
 }
 
-/** Shared by the modal and the popover. Never focuses a button: the scope key would double-fire. */
+/** Shared by the modal and the popover. Never focuses a button, only the input. */
 export function renderCard(
-  el: HTMLElement, card: Card, kind: Kind, onDone: (r: Result) => void, onLayout?: () => void,
+  el: HTMLElement, card: Card, kind: Kind, onDone: (r: Result) => void, onLayout?: (state: State) => void,
 ): Rendered {
-  let state: "ask" | "reveal" | "meet" = kind === "meet" ? "meet" : "ask";
-  const advance = () => {
-    if (state === "ask") { state = "reveal"; draw(); }
-    else if (state === "meet") onDone("met");
+  let state: State = kind === "meet" ? "meet" : "ask";
+  let pending: Result | null = null;
+  let typed = "";
+  let input: HTMLInputElement | null = null;
+  const finish = (r: Result) => { pending = null; onDone(r); };
+  const submit = (v: string) => {
+    const t = v.trim();
+    if (!t) { state = "dontknow"; pending = "miss"; }
+    else if (checkAnswer(t, card.meaning)) { state = "right"; pending = "know"; }
+    else { state = "wrong"; pending = "miss"; typed = t; }
+    draw();
   };
-  const grade = (right: boolean) => { if (state === "reveal") onDone(right ? "know" : "miss"); };
+  const enter = () => {
+    if (state === "ask") submit(input?.value ?? "");
+    else if (state === "meet") finish("met");
+    else if (pending) finish(pending);
+  };
   function draw() {
     el.empty();
     el.addClass("loanword-quiz");
@@ -58,41 +71,63 @@ export function renderCard(
     const c = el.createDiv({ cls: "loanword-card" });
     c.createDiv({ cls: "loanword-lang", text: kind === "meet" ? `New · ${lang}` : lang });
     c.createDiv({ cls: "loanword-prompt", text: card.form, attr: { lang: langOf(card.script) } });
-    if (state === "ask") c.createDiv({ cls: "loanword-hint", text: "Say the meaning, then show the answer" });
-    if (state !== "ask") renderReveal(el, card);
-    if (state === "reveal") {
-      const opts = el.createDiv({ cls: "loanword-options" });
-      for (const [g, key, mark, label] of [["miss", "1", "✗", "Missed"], ["know", "2", "✓", "Knew it"]] as const) {
-        const b = opts.createEl("button", { cls: "loanword-option loanword-grade", attr: { type: "button", "data-grade": g } });
-        b.createSpan({ cls: "loanword-key", text: key });
-        b.createSpan({ cls: "loanword-mark", text: mark });
-        b.createSpan({ cls: "loanword-label", text: label });
-        b.addEventListener("click", () => grade(g === "know"));
-      }
+    input = null;
+    if (state === "ask") {
+      const inp = (input = el.createEl("input", {
+        cls: "loanword-answer",
+        attr: { type: "text", placeholder: "Type the meaning", autocomplete: "off", spellcheck: "false" },
+      }));
+      const acts = el.createDiv({ cls: "loanword-actions" });
+      acts.createEl("button", { cls: "loanword-option loanword-dontknow", text: "Don't know", attr: { type: "button" } })
+        .addEventListener("click", () => submit(""));
+      acts.createEl("button", { cls: "mod-cta loanword-next", text: "Check", attr: { type: "button" } })
+        .addEventListener("click", () => enter());
+      window.setTimeout(() => inp.focus(), 0);
+    } else if (state === "meet") {
+      renderReveal(el, card);
+      el.createEl("button", { cls: "mod-cta loanword-next", text: "Got it", attr: { type: "button" } })
+        .addEventListener("click", () => enter());
     } else {
-      const next = el.createEl("button", { cls: "mod-cta loanword-next", text: state === "ask" ? "Show answer" : "Got it", attr: { type: "button" } });
-      next.addEventListener("click", () => advance());
+      const text = state === "right" ? "✓ Right" : state === "wrong" ? `✗ You typed “${typed}”` : "The answer";
+      el.createDiv({ cls: "loanword-verdict", text, attr: { "data-verdict": state } });
+      renderReveal(el, card);
+      if (state === "wrong") {
+        el.createEl("button", { cls: "loanword-override", text: "I was right", attr: { type: "button" } })
+          .addEventListener("click", () => { pending = "know"; enter(); });
+      }
+      el.createEl("button", { cls: "mod-cta loanword-next", text: "Next", attr: { type: "button" } })
+        .addEventListener("click", () => enter());
     }
-    onLayout?.();
+    onLayout?.(state);
   }
   draw();
-  return { advance, grade };
+  return { enter, pending: () => pending };
 }
 
-/** A small card next to a swapped word. Dismissing it grades nothing. */
+/** A small card next to a swapped word. Dismissing it after a check commits that grade. */
 export class QuizPopover {
+  static current: QuizPopover | null = null;
   private el: HTMLElement | null = null;
   private ui: Rendered | null = null;
+  private onDone: ((r: Result) => void) | null = null;
+  private prevFocus: HTMLElement | null = null;
   private onDown = (e: MouseEvent) => { if (this.el && !this.el.contains(e.target as Node)) this.close(); };
   private onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") { e.preventDefault(); this.close(); }
-    else if (e.key === "1" || e.key === "2") { e.preventDefault(); this.ui?.grade(e.key === "2"); }
-    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); this.ui?.advance(); }
+    else if (e.key === "Enter" && !e.isComposing && this.el?.contains(document.activeElement)) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.ui?.enter();
+    }
   };
 
   constructor(private anchor: DOMRect) {}
 
   open(card: Card, onDone: (r: Result) => void) {
+    QuizPopover.current?.close();
+    QuizPopover.current = this;
+    this.onDone = onDone;
+    this.prevFocus = document.activeElement as HTMLElement | null;
     const el = (this.el = document.body.createDiv({ cls: "loanword-pop" }));
     this.ui = renderCard(el.createDiv(), card, "recall", (r) => { onDone(r); this.close(); }, () => this.place());
     this.place();
@@ -112,9 +147,16 @@ export class QuizPopover {
   }
 
   close() {
+    const p = this.ui?.pending();
+    const done = this.onDone;
+    this.ui = null;
+    this.onDone = null;
+    if (p && done) done(p);
     document.removeEventListener("mousedown", this.onDown, true);
     document.removeEventListener("keydown", this.onKey, true);
     this.el?.remove();
     this.el = null;
+    if (QuizPopover.current === this) QuizPopover.current = null;
+    this.prevFocus?.focus();
   }
 }

@@ -25,10 +25,7 @@ export class ReviewModal extends Modal {
     this.modalEl.addClass("loanword-modal");
     this.titleEl.setText("Loanword");
     this.total = this.queue.length;
-    this.scope.register([], "1", () => { this.ui?.grade(false); return false; });
-    this.scope.register([], "2", () => { this.ui?.grade(true); return false; });
-    this.scope.register([], "Enter", () => { this.ui?.advance(); return false; });
-    this.scope.register([], " ", () => { this.ui?.advance(); return false; });
+    this.scope.register([], "Enter", () => { this.ui?.enter(); return false; });
     this.show();
   }
 
