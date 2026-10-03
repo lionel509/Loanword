@@ -115,7 +115,7 @@ export default class LoanwordPlugin extends Plugin {
   session(): Session {
     const s = this.store?.state;
     const today = this.today();
-    return buildSession(this.deck, s?.items ?? {}, s?.days[today]?.introduced ?? [], today, this.cfg.newPerDay);
+    return buildSession(this.deck, s?.items ?? {}, s?.days[today]?.introduced ?? [], today, Date.now(), this.cfg.newPerDay);
   }
 
   paused(): boolean {
@@ -350,7 +350,7 @@ export default class LoanwordPlugin extends Plugin {
       }
     }
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
-      if (leaf.view instanceof ProgressView) leaf.view.render(this.deck, this.store?.state ?? null, this.cfg, today);
+      if (leaf.view instanceof ProgressView) leaf.view.render(this.deck, this.store?.state ?? null, this.cfg, today, Date.now());
     }
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       // ponytail: editor.cm is undocumented; without it swaps refresh on the next keystroke

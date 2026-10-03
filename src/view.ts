@@ -23,14 +23,14 @@ export class ProgressView extends ItemView {
 
   async onOpen() { this.refresh(); }
 
-  render(deck: Card[], progress: Progress | null, settings: LoanwordSettings, today: string) {
+  render(deck: Card[], progress: Progress | null, settings: LoanwordSettings, today: string, nowMs: number) {
     const el = this.contentEl;
     el.empty();
     el.addClass("loanword-view");
     const p = progress;
     const day = p?.days[today];
     const introducedToday = day?.introduced ?? [];
-    const s = buildSession(deck, p?.items ?? {}, introducedToday, today, settings.newPerDay);
+    const s = buildSession(deck, p?.items ?? {}, introducedToday, today, nowMs, settings.newPerDay);
     el.createEl("p", {
       text: `Today: ${s.due.length} due · ${introducedToday.length}/${settings.newPerDay} new · ${day?.reviews ?? 0} reviewed`,
     });

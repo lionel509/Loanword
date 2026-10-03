@@ -6,7 +6,10 @@ export const ROLLOVER_HOUR = 4;
 export const INTERVALS = [0, 1, 3, 7, 14, 30];
 export const MAX_BOX = 5;
 
-export interface Rec { box: number; due: string; seen: number; right: number; wrong: number; updated: number }
+export interface Rec { box: number; due: string; seen: number; right: number; wrong: number; updated: number;
+  /** ms epoch; present iff box === 0 (met or missed today): not askable before this. */ notBefore?: number }
+export const RELEARN_MS = 30 * 60e3;   // a missed recall comes back after this
+export const MEET_MS = 60 * 60e3;      // a met card gets its cold recall after this
 export type Mode = "review" | "note";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -21,30 +24,32 @@ export function addDays(k: string, n: number): string {
   return key(new Date(y, m - 1, d + n));
 }
 
+export function isDue(rec: Rec | undefined, today: string, nowMs: number): boolean {
+  return !!rec && rec.due <= today && (rec.notBefore ?? 0) <= nowMs;
+}
+
+export function meet(nowMs: number, today: string): Rec {
+  return { box: 0, due: today, seen: 0, right: 0, wrong: 0, updated: nowMs, notBefore: nowMs + MEET_MS };
+}
+
 export function grade(rec: Rec | undefined, right: boolean, mode: Mode, today: string, nowMs: number): Rec {
-  const r: Rec = rec
-    ? { ...rec, seen: rec.seen + 1, right: rec.right + (right ? 1 : 0), wrong: rec.wrong + (right ? 0 : 1), updated: nowMs }
-    : { box: 0, due: today, seen: 1, right: right ? 1 : 0, wrong: right ? 0 : 1, updated: nowMs };
-  const tomorrow = addDays(today, 1);
-  if (right) {
-    if (mode === "note" && rec && rec.due > today) return r;   // not due: only seen/right tick
-    r.box = Math.min(r.box + 1, MAX_BOX);
-    r.due = addDays(today, INTERVALS[r.box]);
-  } else {
-    r.box = mode === "note" && rec ? Math.max(1, rec.box - 1) : 1;
-    r.due = tomorrow;
-  }
+  const prev = rec ?? meet(nowMs, today);
+  const r: Rec = { ...prev, seen: prev.seen + 1, right: prev.right + (right ? 1 : 0), wrong: prev.wrong + (right ? 0 : 1), updated: nowMs };
+  if (mode === "note" && (right ? !isDue(rec, today, nowMs) : prev.box === 0)) return r;   // counters only
+  if (right) { r.box = Math.min(prev.box + 1, MAX_BOX); r.due = addDays(today, INTERVALS[r.box]); delete r.notBefore; }
+  else if (mode === "note") { r.box = Math.max(1, prev.box - 1); r.due = addDays(today, 1); }
+  else { r.box = 0; r.due = today; r.notBefore = nowMs + RELEARN_MS; }
   return r;
 }
 
-export interface Session { due: Card[]; fresh: Card[] }
+export interface Session { due: Card[]; fresh: Card[]; /** earliest notBefore still in the future among cards due today by date; 0 = none */ waitUntil: number }
 
 export function buildSession(
   deck: Card[], items: Record<string, Rec>, introducedToday: string[],
-  today: string, newPerDay: number, maxDue = 50,
+  today: string, nowMs: number, newPerDay: number, maxDue = 50,
 ): Session {
   const due = deck
-    .filter((c) => items[c.id] && items[c.id].due <= today)
+    .filter((c) => isDue(items[c.id], today, nowMs))
     .sort((a, b) => {
       const da = items[a.id].due, db = items[b.id].due;
       return (da < db ? -1 : da > db ? 1 : 0) || a.unit - b.unit || a.order - b.order;
@@ -54,11 +59,16 @@ export function buildSession(
     .filter((c) => !items[c.id])
     .sort((a, b) => a.unit - b.unit || a.order - b.order)
     .slice(0, Math.max(0, newPerDay - introducedToday.length));
-  return { due, fresh };
+  let waitUntil = 0;
+  for (const c of deck) {
+    const r = items[c.id];
+    if (r && r.due <= today && (r.notBefore ?? 0) > nowMs && (!waitUntil || r.notBefore! < waitUntil)) waitUntil = r.notBefore!;
+  }
+  return { due, fresh, waitUntil };
 }
 
 export function isDone(s: Session): boolean {
-  return s.due.length === 0 && s.fresh.length === 0;
+  return s.due.length === 0 && s.fresh.length === 0 && s.waitUntil === 0;
 }
 
 export interface Tally { fresh: number; learning: number; known: number }
