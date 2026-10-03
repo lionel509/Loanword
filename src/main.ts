@@ -98,7 +98,7 @@ export default class LoanwordPlugin extends Plugin {
     })]);
 
     this.registerDomEvent(window, "focus", () => this.onStoreChange());
-    this.registerInterval(window.setInterval(() => void this.maybePrompt(false), 60_000));
+    this.registerInterval(window.setInterval(() => { this.onStoreChange(); void this.maybePrompt(false); }, 60_000));
     this.app.workspace.onLayoutReady(() => this.boot());
   }
 
