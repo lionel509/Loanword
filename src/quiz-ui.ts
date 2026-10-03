@@ -1,44 +1,62 @@
 import type { Card } from "./deck";
-import type { Question } from "./question";
-
-/** zh card → pinyin, then `ko (hanja)`; ko card → hanja, then `zh pinyin`. */
-export function revealText(c: Card): string {
-  const parts: string[] = [];
-  if (c.script === "zh") {
-    if (c.pinyin) parts.push(c.pinyin);
-    if (c.ko) parts.push(c.hanja ? `${c.ko} (${c.hanja})` : c.ko);
-  } else {
-    if (c.hanja) parts.push(c.hanja);
-    if (c.zh) parts.push(c.pinyin ? `${c.zh} ${c.pinyin}` : c.zh);
-  }
-  return parts.join(" · ");
-}
+import { displayMeaning, type Question } from "./question";
 
 export interface Rendered { pick(i: number): void; next(): void }
+
+const langOf = (script: Card["script"]) => (script === "zh" ? "zh-Hans" : "ko");
+
+/** Reading, the other language's half of the row, then the full meaning. */
+function renderReveal(el: HTMLElement, c: Card) {
+  const box = el.createDiv({ cls: "loanword-reveal" });
+  if (c.reading) box.createDiv({ cls: "loanword-reading", text: c.reading, attr: { lang: langOf(c.script) } });
+  if (c.script === "zh" && c.ko) {
+    const o = box.createDiv({ cls: "loanword-other" });
+    o.createSpan({ cls: "loanword-other-label", text: "Korean" });
+    o.createSpan({ text: c.ko, attr: { lang: "ko" } });
+    if (c.hanja) o.appendText(` (${c.hanja})`);
+  } else if (c.script === "ko" && c.zh) {
+    const o = box.createDiv({ cls: "loanword-other" });
+    o.createSpan({ cls: "loanword-other-label", text: "Chinese" });
+    o.createSpan({ text: c.zh, attr: { lang: "zh-Hans" } });
+    if (c.pinyin) o.appendText(` ${c.pinyin}`);
+  }
+  box.createDiv({ cls: "loanword-meaning", text: c.meaning });
+}
 
 /** Shared by the modal and the popover. Nothing is revealed until a pick. */
 export function renderQuestion(
   el: HTMLElement, q: Question, onAnswer: (right: boolean) => void, onNext: () => void,
 ): Rendered {
   el.empty();
-  el.createDiv({ cls: "loanword-prompt", text: q.prompt, attr: { lang: q.card.script === "zh" ? "zh-Hans" : "ko" } });
+  el.addClass("loanword-quiz");
+  el.dataset.state = "ask";
+  const card = el.createDiv({ cls: "loanword-card" });
+  card.createDiv({ cls: "loanword-lang", text: q.card.script === "zh" ? "Chinese" : "Korean" });
+  card.createDiv({ cls: "loanword-prompt", text: q.prompt, attr: { lang: langOf(q.card.script) } });
   const opts = el.createDiv({ cls: "loanword-options" });
   let picked = false;
-  let nextBtn: HTMLButtonElement | null = null;
   const buttons = q.options.map((o, i) => {
-    const b = opts.createEl("button", { text: `${i + 1} ${o}` });
+    const b = opts.createEl("button", { cls: "loanword-option", attr: { type: "button" } });
+    b.createSpan({ cls: "loanword-key", text: String(i + 1) });
+    b.createSpan({ cls: "loanword-label", text: displayMeaning(o) });
+    b.createSpan({ cls: "loanword-mark", text: "" });
     b.addEventListener("click", () => pick(i));
     return b;
   });
+  const mark = (b: HTMLButtonElement, t: string) => b.querySelector(".loanword-mark")?.setText(t);
   function pick(i: number) {
     if (picked || i < 0 || i >= buttons.length) return;
     picked = true;
-    buttons.forEach((b) => (b.disabled = true));
-    buttons[q.answer].addClass("is-right");
-    if (i !== q.answer) buttons[i].addClass("is-wrong");
+    // Never `disabled`: it greys the buttons and hides the right/wrong colours.
+    el.dataset.state = "answered";
+    buttons.forEach((b, j) => {
+      if (j === q.answer) { b.addClass("is-right"); mark(b, "✓"); }
+      else if (j === i) { b.addClass("is-wrong"); mark(b, "✗"); }
+      else b.addClass("is-dim");
+    });
     onAnswer(i === q.answer);
-    el.createDiv({ cls: "loanword-reveal", text: revealText(q.card) });
-    nextBtn = el.createEl("button", { cls: "mod-cta", text: "Next" });
+    renderReveal(el, q.card);
+    const nextBtn = el.createEl("button", { cls: "mod-cta loanword-next", text: "Next", attr: { type: "button" } });
     nextBtn.addEventListener("click", () => onNext());
     nextBtn.focus();
   }
@@ -59,7 +77,7 @@ export class QuizPopover {
 
   open(q: Question, onAnswer: (right: boolean) => void) {
     const el = (this.el = document.body.createDiv({ cls: "loanword-pop" }));
-    this.ui = renderQuestion(el, q, onAnswer, () => this.close());
+    this.ui = renderQuestion(el.createDiv(), q, onAnswer, () => this.close());
     const r = el.getBoundingClientRect();
     const left = Math.max(4, Math.min(this.anchor.left, window.innerWidth - r.width - 4));
     let top = this.anchor.bottom + 4;

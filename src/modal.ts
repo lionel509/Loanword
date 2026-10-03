@@ -12,6 +12,8 @@ export class ReviewModal extends Modal {
   private finished = false;
   private silenced = false;
   private ui: Rendered | null = null;
+  private total = 0;
+  private learned = new Set<string>();
 
   constructor(
     app: App,
@@ -28,6 +30,9 @@ export class ReviewModal extends Modal {
   }
 
   onOpen() {
+    this.modalEl.addClass("loanword-modal");
+    this.titleEl.setText("Loanword");
+    this.total = this.queue.length;
     this.scope.register([], "1", () => { this.ui?.pick(0); return false; });
     this.scope.register([], "2", () => { this.ui?.pick(1); return false; });
     this.scope.register([], "3", () => { this.ui?.pick(2); return false; });
@@ -41,7 +46,9 @@ export class ReviewModal extends Modal {
     contentEl.empty();
     const card = this.queue[0];
     if (!card) return this.summary();
-    this.titleEl.setText(`Loanword — ${this.queue.length} left`);
+    const bar = contentEl.createDiv({ cls: "loanword-progress" }).createDiv({ cls: "loanword-progress-bar" });
+    const setBar = () => { bar.style.width = `${this.total ? (100 * this.learned.size) / this.total : 0}%`; };
+    setBar();
     const body = contentEl.createDiv();
     const q = makeQuestion(card, this.deck, fnv1a(card.id + "|" + this.today));
     this.ui = renderQuestion(body, q, (right) => {
@@ -50,18 +57,24 @@ export class ReviewModal extends Modal {
         if (this.isNew(card)) this.introduced++; else this.reviewed++;
         this.onAnswer(card, right);
       }
+      if (right) { this.learned.add(card.id); setBar(); }
       this.queue.shift();
       if (!right) this.queue.push(card);   // re-asked until right; only the first answer grades
     }, () => this.show());
-    const snooze = contentEl.createEl("button", { text: "Snooze 1 h" });
+    const foot = contentEl.createDiv({ cls: "loanword-foot" });
+    foot.createSpan({ cls: "loanword-hint", text: "1–3 to answer · Enter for next" });
+    const snooze = foot.createEl("button", { cls: "loanword-snooze", text: "Snooze 1 h", attr: { type: "button" } });
     snooze.addEventListener("click", () => this.close());
   }
 
   private summary() {
     this.ui = null;
-    this.titleEl.setText("Loanword");
-    this.contentEl.createEl("p", { text: `Done. ${this.reviewed} reviewed, ${this.introduced} new. Back tomorrow.` });
-    const close = this.contentEl.createEl("button", { cls: "mod-cta", text: "Close" });
+    const wrap = this.contentEl.createDiv({ cls: "loanword-quiz" });
+    const done = wrap.createDiv({ cls: "loanword-done" });
+    done.createDiv({ cls: "loanword-done-mark", text: "✓" });
+    done.createDiv({ cls: "loanword-done-title", text: "Done for today" });
+    done.createDiv({ cls: "loanword-done-stats", text: `${this.reviewed} reviewed · ${this.introduced} new · back tomorrow` });
+    const close = wrap.createEl("button", { cls: "mod-cta loanword-next", text: "Close", attr: { type: "button" } });
     // ponytail: finished on reaching the summary, not on Close, so Esc here is not a snooze
     this.finished = true;
     this.onFinish();

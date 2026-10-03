@@ -1,6 +1,39 @@
 .loanword-swap { border-bottom: 1px dotted var(--interactive-accent); cursor: pointer; }
 .loanword-pop { background: var(--background-secondary); color: var(--text-normal); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); box-shadow: var(--shadow-s); padding: var(--size-4-3); z-index: var(--layer-popover); position: fixed; }
-.loanword-prompt { font-size: 2.4em; text-align: center; }
-.loanword-options button.is-right { color: var(--text-success); }
-.is-wrong { color: var(--text-error); }
 .loanword-status.is-due { color: var(--interactive-accent); }
+.loanword-modal { width: min(440px, 92vw); }
+.loanword-quiz { display: flex; flex-direction: column; gap: var(--size-4-3); }
+.loanword-quiz [lang="zh-Hans"] { font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif; }
+.loanword-quiz [lang="ko"] { font-family: "Apple SD Gothic Neo", "Noto Sans CJK KR", sans-serif; }
+.loanword-quiz .loanword-card { text-align: center; padding: var(--size-4-2) 0 0; }
+.loanword-quiz .loanword-lang { font-size: var(--font-ui-smaller); color: var(--text-faint); text-transform: uppercase; letter-spacing: .08em; }
+.loanword-quiz .loanword-prompt { font-size: 72px; line-height: 1.2; color: var(--text-normal); }
+.loanword-quiz .loanword-options { display: flex; flex-direction: column; gap: var(--size-4-2); }
+.loanword-quiz .loanword-option { display: flex; align-items: center; gap: var(--size-4-3); width: 100%; height: auto; min-height: 44px; margin: 0; padding: var(--size-4-2) var(--size-4-3); justify-content: flex-start; text-align: left; background: var(--background-secondary); color: var(--text-normal); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); box-shadow: none; font-size: var(--font-ui-medium); cursor: pointer; }
+.loanword-quiz .loanword-option:hover { border-color: var(--interactive-accent); }
+.loanword-quiz .loanword-key { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; border-radius: var(--radius-s); background: var(--background-modifier-hover); color: var(--text-muted); font-family: var(--font-monospace); font-size: var(--font-ui-smaller); }
+.loanword-quiz .loanword-label { flex: 1; }
+.loanword-quiz .loanword-mark { font-weight: 700; }
+.loanword-quiz[data-state="answered"] .loanword-option { pointer-events: none; }
+.loanword-quiz .loanword-option.is-dim { opacity: .4; }
+.loanword-quiz .loanword-option.is-right { border-color: var(--color-green); background: color-mix(in srgb, var(--color-green) 18%, var(--background-secondary)); }
+.loanword-quiz .loanword-option.is-right .loanword-mark { color: var(--color-green); }
+.loanword-quiz .loanword-option.is-wrong { border-color: var(--color-red); background: color-mix(in srgb, var(--color-red) 18%, var(--background-secondary)); }
+.loanword-quiz .loanword-option.is-wrong .loanword-mark { color: var(--color-red); }
+.loanword-quiz .loanword-reveal { display: flex; flex-direction: column; gap: 4px; text-align: center; padding: var(--size-4-3); border-radius: var(--radius-m); background: var(--background-secondary); }
+.loanword-quiz .loanword-reading { font-size: 1.6em; color: var(--text-accent); }
+.loanword-quiz .loanword-other-label { margin-right: 6px; color: var(--text-faint); font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: .08em; }
+.loanword-quiz .loanword-meaning { color: var(--text-muted); font-size: var(--font-ui-small); }
+.loanword-quiz .loanword-next { width: 100%; min-height: 40px; margin: 0; }
+.loanword-progress { height: 3px; margin-bottom: var(--size-4-3); background: var(--background-modifier-border); border-radius: 2px; overflow: hidden; }
+.loanword-progress-bar { height: 100%; background: var(--interactive-accent); transition: width .2s; }
+.loanword-foot { display: flex; justify-content: space-between; align-items: center; margin-top: var(--size-4-3); padding-top: var(--size-4-2); border-top: 1px solid var(--background-modifier-border); }
+.loanword-hint { color: var(--text-faint); font-size: var(--font-ui-smaller); }
+.loanword-foot .loanword-snooze { background: none; box-shadow: none; border: none; color: var(--text-muted); font-size: var(--font-ui-small); padding: 4px 8px; cursor: pointer; }
+.loanword-foot .loanword-snooze:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.loanword-done { display: flex; flex-direction: column; gap: var(--size-4-2); padding: var(--size-4-4) 0; text-align: center; }
+.loanword-done-mark { font-size: 56px; line-height: 1; color: var(--color-green); }
+.loanword-done-title { font-size: 1.4em; font-weight: 600; }
+.loanword-done-stats { color: var(--text-muted); }
+.loanword-pop { width: 280px; }
+.loanword-pop .loanword-quiz .loanword-prompt { font-size: 44px; }
