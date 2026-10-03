@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync, watch, type FSWatcher }
 import { isAbsolute, join, relative } from "node:path";
 import { parseDeck, type Card } from "./deck";
 import { refreshSwaps, swapPlugin } from "./decorate";
-import { pickDrip } from "./drip";
+import { nextDripAt, nextLabel, pickDrip, shouldFire } from "./drip";
 import { ReviewModal } from "./modal";
 import { buildLexicon, type Lexicon } from "./pick";
 import { QuizPopover } from "./quiz-ui";
@@ -18,7 +18,8 @@ import { ProgressView, VIEW_TYPE } from "./view";
 
 const CLAIM_TTL = 90_000;
 const HEARTBEAT = 30_000;
-const SNOOZE = 3_600_000;
+const DISMISS_MS = 15 * 60e3;
+const TICK_MS = 5_000;
 
 export default class LoanwordPlugin extends Plugin {
   cfg: LoanwordSettings = { ...DEFAULT_SETTINGS };
@@ -29,13 +30,12 @@ export default class LoanwordPlugin extends Plugin {
   private statusEl!: HTMLElement;
   private modal: ReviewModal | null = null;
   private heartbeat: number | null = null;
-  private snoozeTimer: number | null = null;
   private stopStore: (() => void) | null = null;
   private deckWatcher: FSWatcher | null = null;
   private deckTimer: number | null = null;
   private warnedNoDeck = false;
-  private bootTimer: number | null = null;
   private unloaded = false;
+  private lastKeyAt = 0;
 
   async onload() {
     this.cfg = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -93,7 +93,9 @@ export default class LoanwordPlugin extends Plugin {
     })]);
 
     this.registerDomEvent(window, "focus", () => this.onStoreChange());
-    this.registerInterval(window.setInterval(() => { this.onStoreChange(); void this.maybePrompt(false); }, 60_000));
+    this.registerDomEvent(document, "keydown", () => { this.lastKeyAt = Date.now(); }, true);
+    this.registerInterval(window.setInterval(() => this.tick(), TICK_MS));
+    this.registerInterval(window.setInterval(() => this.onStoreChange(), 60_000));
     this.app.workspace.onLayoutReady(() => this.boot());
   }
 
@@ -142,14 +144,13 @@ export default class LoanwordPlugin extends Plugin {
     mkdirSync(join(dir, ".loanword"), { recursive: true });
     this.store = new Store(join(dir, ".loanword", "progress.json"));
     this.store.load();
+    this.armFirstDrip();
     this.stopStore = this.store.watch(() => this.onStoreChange());
     this.deckWatcher = watch(dir, { persistent: false }, (_e, name) => {
       if (!name || !String(name).endsWith(".md")) return;   // A2: ignore .loanword/ writes
       if (this.deckTimer !== null) window.clearTimeout(this.deckTimer);
       this.deckTimer = window.setTimeout(() => { this.loadDeck(); this.refreshAll(); }, 500);
     });
-    if (this.bootTimer !== null) window.clearTimeout(this.bootTimer);
-    this.bootTimer = window.setTimeout(() => { this.bootTimer = null; void this.maybePrompt(false); }, 1500);
     this.refreshAll();
   }
 
@@ -162,8 +163,8 @@ export default class LoanwordPlugin extends Plugin {
 
   private clearTimers() {
     for (const t of [this.heartbeat]) if (t !== null) window.clearInterval(t);
-    for (const t of [this.snoozeTimer, this.deckTimer, this.bootTimer]) if (t !== null) window.clearTimeout(t);
-    this.heartbeat = this.snoozeTimer = this.deckTimer = this.bootTimer = null;
+    for (const t of [this.deckTimer]) if (t !== null) window.clearTimeout(t);
+    this.heartbeat = this.deckTimer = null;
   }
 
   loadDeck() {
@@ -196,29 +197,35 @@ export default class LoanwordPlugin extends Plugin {
 
   // ---- the daily prompt -----------------------------------------------------
 
+  private armFirstDrip() {
+    const now = Date.now(), first = now + this.cfg.firstDripMinutes * 60e3;
+    this.store?.update((s) => { if (s.drip.next < first) s.drip = { next: first, at: now }; });
+  }
+
+  private tick() {
+    const s = this.store?.state;
+    if (!s || this.modal || Date.now() < s.drip.next) return;
+    void this.maybePrompt(false);
+  }
+
   /** Resolves to a Notice-ready reason when the review did not open, else null. */
   async maybePrompt(force: boolean): Promise<string | null> {
     const store = this.store;
     if (!store || !this.deck.length || this.modal) return null;
     store.load();
-    const s = store.state;
-    const now = Date.now();
-    const today = this.today();
-    if (this.paused()) return `Loanword: paused until ${s.pause.until}`;
-    if (isDone(this.session())) return "Loanword: done for today ✓";
-    if (!force && s.drip.next > now) {
-      if (this.snoozeTimer !== null) window.clearTimeout(this.snoozeTimer);
-      this.snoozeTimer = window.setTimeout(() => void this.maybePrompt(false), s.drip.next - now + 500);
-      return null;
-    }
+    const now = Date.now(), today = this.today();
     const claimedElsewhere = () => {
       const p = store.state.prompt;
       return !!p && p.day === today && p.owner !== this.instanceId && Date.now() - p.at < CLAIM_TTL;
     };
+    const paused = this.paused(), session = this.session(), done = isDone(session);
+    if (paused) return `Loanword: paused until ${store.state.pause.until}`;
+    if (done) return "Loanword: done for today ✓";
+    if (!force && !shouldFire({ focused: document.hasFocus(), lastKeyAt: this.lastKeyAt, paused, done, claimFree: !claimedElsewhere(), nextAt: store.state.drip.next }, now, this.cfg.idleSeconds)) return null;
     if (claimedElsewhere()) return "Loanword: review is open in another window";
     if (!force) await new Promise((r) => window.setTimeout(r, Math.random() * 1500));
     if (this.unloaded || !this.store || this.modal) return null;
-    // Compare-and-set: the file's claim wins; only write ours if it is still free.
+    // Compare-and-set (R4): re-check inside the claiming write; the file's claim wins.
     let allowed = false;
     store.update((st) => {
       allowed = force || (st.drip.next <= Date.now() && !(st.pause.until >= today));
@@ -227,10 +234,15 @@ export default class LoanwordPlugin extends Plugin {
     if (!allowed) return null;
     if (store.state.prompt?.owner !== this.instanceId) return "Loanword: review is open in another window";
 
-    const session = this.session();
-    if (isDone(session)) { this.releaseClaim(); return "Loanword: done for today ✓"; }
+    const fresh = this.session();
+    const queue = pickDrip(fresh, force ? Infinity : this.cfg.cardsPerDrip);
+    if (!queue.length) {
+      this.releaseClaim();
+      if (!force) this.rearm(fresh.waitUntil || nextDripAt(Date.now(), this.cfg.dripMin, this.cfg.dripMax, Math.random()));
+      return fresh.waitUntil ? `Loanword: next card in ~${Math.ceil((fresh.waitUntil - Date.now()) / 60e3)} min` : "Loanword: done for today ✓";
+    }
     this.modal = new ReviewModal(
-      this.app, pickDrip(session, Infinity),
+      this.app, queue,
       (card, r) => r === "met" ? this.onMeet(card) : this.onAnswer(card, r === "know", "review"),
       () => this.onFinish(),
       () => this.onDismiss(),
@@ -241,6 +253,8 @@ export default class LoanwordPlugin extends Plugin {
     this.modal.open();
     return null;
   }
+
+  private rearm(next: number) { this.store?.update((s) => { s.drip = { next, at: Date.now() }; }); }
 
   /** "Review now" from a command, the sidebar or the status bar: say why when it cannot open. */
   async reviewNow(fromStatusBar: boolean) {
@@ -284,20 +298,18 @@ export default class LoanwordPlugin extends Plugin {
     this.endModal();
     this.store?.update((s) => {
       if (s.prompt?.owner === this.instanceId) s.prompt = null;
-      s.drip = { next: 0, at: Date.now() };
+      s.drip = { next: nextDripAt(Date.now(), this.cfg.dripMin, this.cfg.dripMax, Math.random()), at: Date.now() };
     });
     this.refreshAll();
   }
 
   onDismiss() {
     this.endModal();
-    const now = Date.now();
     this.store?.update((s) => {
       if (s.prompt?.owner === this.instanceId) s.prompt = null;
-      s.drip = { next: now + SNOOZE, at: now };
+      s.drip = { next: Date.now() + DISMISS_MS, at: Date.now() };
     });
     this.refreshAll();
-    void this.maybePrompt(false);   // schedules the timer for the snooze end
   }
 
   private releaseClaim() {
@@ -350,7 +362,10 @@ export default class LoanwordPlugin extends Plugin {
       else {
         const s = this.session();
         if (isDone(s)) el.setText("Loanword ✓");
-        else { el.setText(`Loanword: ${s.due.length} due · ${s.fresh.length} new`); el.addClass("is-due"); }
+        else {
+          el.setText(`Loanword: ${s.due.length} due${s.fresh.length ? ` · ${s.fresh.length} new` : ""} · ${nextLabel(s, this.store.state.drip.next, Date.now())}`);
+          el.addClass("is-due");
+        }
       }
     }
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
@@ -401,7 +416,7 @@ class LoanwordSettingTab extends PluginSettingTab {
         t.inputEl.addEventListener("change", () => p.boot());
       });
 
-    const num = (name: string, desc: string, key: "newPerDay" | "swapEvery" | "maxSwapsPerNote") =>
+    const num = (name: string, desc: string, key: "newPerDay" | "swapEvery" | "maxSwapsPerNote" | "dripMin" | "dripMax" | "cardsPerDrip" | "idleSeconds" | "firstDripMinutes") =>
       new Setting(containerEl).setName(name).setDesc(desc)
         .addText((t) => t.setValue(String(p.cfg[key])).onChange(async (v) => {
           const n = Number(v);
@@ -409,9 +424,14 @@ class LoanwordSettingTab extends PluginSettingTab {
           p.cfg[key] = Math.floor(n);
           await p.saveSettings();
         }));
-    num("New cards per day", "How many unseen cards each day's review introduces.", "newPerDay");
+    num("New cards per day", "How many unseen cards the drips introduce each day.", "newPerDay");
     num("Swap every", "Minimum words between two swapped words in a note.", "swapEvery");
     num("Max swaps per note", "Upper bound on swapped words in one note.", "maxSwapsPerNote");
+    num("Drip every (min)", "Shortest wait between two drips, in minutes.", "dripMin");
+    num("Drip every (max)", "Longest wait between two drips, in minutes.", "dripMax");
+    num("Cards per drip", "How many cards one drip asks.", "cardsPerDrip");
+    num("Idle seconds", "A drip waits until you have not typed for this long.", "idleSeconds");
+    num("First drip after (min)", "Minutes after Obsidian opens before the first drip.", "firstDripMinutes");
 
     new Setting(containerEl)
       .setName("Swap script")

@@ -1,5 +1,6 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
 import type { Card } from "./deck";
+import { nextLabel } from "./drip";
 import { buildSession, isDone, tally } from "./schedule";
 import type { LoanwordSettings } from "./settings";
 import type { Progress } from "./store";
@@ -31,15 +32,16 @@ export class ProgressView extends ItemView {
     const day = p?.days[today];
     const introducedToday = day?.introduced ?? [];
     const s = buildSession(deck, p?.items ?? {}, introducedToday, today, nowMs, settings.newPerDay);
+    const paused = !!p && p.pause.until >= today;
     el.createEl("p", {
-      text: `Today: ${s.due.length} due · ${introducedToday.length}/${settings.newPerDay} new · ${day?.reviews ?? 0} reviewed`,
+      text: `Today: ${s.due.length} due · ${introducedToday.length}/${settings.newPerDay} new · ${day?.reviews ?? 0} reviewed`
+        + (p && !paused && !isDone(s) ? ` · ${nextLabel(s, p.drip.next, nowMs)}` : ""),
     });
 
     const bar = el.createDiv({ cls: "loanword-buttons" });
     const review = bar.createEl("button", { cls: "mod-cta", text: "Review now" });
     review.disabled = !p || isDone(s);
     review.addEventListener("click", () => this.actions.review());
-    const paused = !!p && p.pause.until >= today;
     if (paused) {
       bar.createEl("button", { text: "Resume" }).addEventListener("click", () => this.actions.resume());
     } else {
