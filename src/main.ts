@@ -242,7 +242,7 @@ export default class LoanwordPlugin extends Plugin {
       () => this.onSnooze(),
     );
     this.heartbeat = window.setInterval(() => {
-      store.update((st) => { if (st.prompt?.owner === this.instanceId) st.prompt.at = Date.now(); });
+      store.update((st) => { if (st.prompt?.owner === this.instanceId) { st.prompt.at = Date.now(); st.prompt.day = this.today(); } });
     }, HEARTBEAT);
     this.modal.open();
   }
