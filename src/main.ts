@@ -42,7 +42,7 @@ export default class LoanwordPlugin extends Plugin {
     this.cfg = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.addSettingTab(new LoanwordSettingTab(this.app, this));
     this.registerView(VIEW_TYPE, (leaf) => new ProgressView(leaf, {
-      review: () => void this.maybePrompt(true),
+      review: () => void this.reviewNow(false),
       pause: (d) => this.pause(d),
       resume: () => this.resume(),
     }, () => this.refreshAll()));
@@ -50,11 +50,11 @@ export default class LoanwordPlugin extends Plugin {
     this.statusEl = this.addStatusBarItem();
     this.statusEl.addClass("loanword-status");
     this.registerDomEvent(this.statusEl, "click", () => {
-      if (this.store && !isDone(this.session())) void this.maybePrompt(true);
+      if (this.store) void this.reviewNow(true);
       else void this.openSidebar();
     });
 
-    this.addCommand({ id: "review-now", name: "Review now", callback: () => void this.maybePrompt(true) });
+    this.addCommand({ id: "review-now", name: "Review now", callback: () => void this.reviewNow(false) });
     this.addCommand({ id: "open-progress", name: "Open progress", callback: () => void this.openSidebar() });
     this.addCommand({ id: "pause-today", name: "Pause for today", callback: () => this.pause(1) });
     this.addCommand({ id: "pause-7-days", name: "Pause for 7 days", callback: () => this.pause(7) });
@@ -201,38 +201,39 @@ export default class LoanwordPlugin extends Plugin {
 
   // ---- the daily prompt -----------------------------------------------------
 
-  async maybePrompt(force: boolean) {
+  /** Resolves to a Notice-ready reason when the review did not open, else null. */
+  async maybePrompt(force: boolean): Promise<string | null> {
     const store = this.store;
-    if (!store || !this.deck.length || this.modal) return;
+    if (!store || !this.deck.length || this.modal) return null;
     store.load();
     const s = store.state;
     const now = Date.now();
     const today = this.today();
-    if (this.paused()) return;
-    if (isDone(this.session())) return;
+    if (this.paused()) return `Loanword: paused until ${s.pause.until}`;
+    if (isDone(this.session())) return "Loanword: done for today ✓";
     if (!force && s.snooze.until > now) {
       if (this.snoozeTimer !== null) window.clearTimeout(this.snoozeTimer);
       this.snoozeTimer = window.setTimeout(() => void this.maybePrompt(false), s.snooze.until - now + 500);
-      return;
+      return null;
     }
     const claimedElsewhere = () => {
       const p = store.state.prompt;
       return !!p && p.day === today && p.owner !== this.instanceId && Date.now() - p.at < CLAIM_TTL;
     };
-    if (claimedElsewhere()) return;
+    if (claimedElsewhere()) return "Loanword: review is open in another window";
     if (!force) await new Promise((r) => window.setTimeout(r, Math.random() * 1500));
-    if (this.unloaded || !this.store) return;
-    if (this.modal) return;
+    if (this.unloaded || !this.store || this.modal) return null;
     // Compare-and-set: the file's claim wins; only write ours if it is still free.
     let allowed = false;
     store.update((st) => {
       allowed = force || (st.snooze.until <= Date.now() && !(st.pause.until >= today));
       if (allowed && !claimedElsewhere()) st.prompt = { day: today, owner: this.instanceId, at: Date.now() };
     });
-    if (!allowed || store.state.prompt?.owner !== this.instanceId) return;
+    if (!allowed) return null;
+    if (store.state.prompt?.owner !== this.instanceId) return "Loanword: review is open in another window";
 
     const session = this.session();
-    if (isDone(session)) { this.releaseClaim(); return; }
+    if (isDone(session)) { this.releaseClaim(); return "Loanword: done for today ✓"; }
     const items = store.state.items;
     this.modal = new ReviewModal(
       this.app, [...session.due, ...session.fresh], this.deck, today,
@@ -245,6 +246,15 @@ export default class LoanwordPlugin extends Plugin {
       store.update((st) => { if (st.prompt?.owner === this.instanceId) { st.prompt.at = Date.now(); st.prompt.day = this.today(); } });
     }, HEARTBEAT);
     this.modal.open();
+    return null;
+  }
+
+  /** "Review now" from a command, the sidebar or the status bar: say why when it cannot open. */
+  async reviewNow(fromStatusBar: boolean) {
+    const why = await this.maybePrompt(true);
+    if (!why) return;
+    new Notice(why);
+    if (fromStatusBar) void this.openSidebar();
   }
 
   onAnswer(card: Card, right: boolean, mode: Mode) {
