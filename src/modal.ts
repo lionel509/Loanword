@@ -25,7 +25,7 @@ export class ReviewModal extends Modal {
     this.modalEl.addClass("loanword-modal");
     this.titleEl.setText("Loanword");
     this.total = this.queue.length;
-    this.scope.register([], "Enter", () => { this.ui?.enter(); return false; });
+    this.scope.register([], "Enter", (e) => { if (!e.repeat) this.ui?.enter(); return false; });
     this.show();
   }
 

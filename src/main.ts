@@ -39,6 +39,7 @@ export default class LoanwordPlugin extends Plugin {
 
   async onload() {
     this.cfg = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    for (const k of ["dripMin", "dripMax", "cardsPerDrip", "idleSeconds", "firstDripMinutes"] as const) this.cfg[k] = Math.max(1, this.cfg[k]);
     this.addSettingTab(new LoanwordSettingTab(this.app, this));
     this.registerView(VIEW_TYPE, (leaf) => new ProgressView(leaf, {
       review: () => void this.reviewNow(false),
@@ -100,6 +101,7 @@ export default class LoanwordPlugin extends Plugin {
   }
 
   onunload() {
+    QuizPopover.current?.close();
     this.unloaded = true;
     this.stopWatchers();
     this.clearTimers();
@@ -213,6 +215,7 @@ export default class LoanwordPlugin extends Plugin {
   async maybePrompt(force: boolean): Promise<string | null> {
     const store = this.store;
     if (!store || !this.deck.length || this.modal) return null;
+    if (force) QuizPopover.current?.close();   // commit its grade before the queue is picked
     store.load();
     const now = Date.now(), today = this.today();
     const claimedElsewhere = () => {
@@ -252,7 +255,6 @@ export default class LoanwordPlugin extends Plugin {
     this.heartbeat = window.setInterval(() => {
       store.update((st) => { if (st.prompt?.owner === this.instanceId) { st.prompt.at = Date.now(); st.prompt.day = this.today(); } });
     }, HEARTBEAT);
-    QuizPopover.current?.close();
     this.modal.open();
     return null;
   }

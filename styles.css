@@ -10,10 +10,8 @@
 .loanword-quiz .loanword-card { text-align: center; padding: var(--size-4-2) 0 0; }
 .loanword-quiz .loanword-lang { font-size: var(--font-ui-smaller); color: var(--text-faint); text-transform: uppercase; letter-spacing: .08em; }
 .loanword-quiz .loanword-prompt { font-size: 64px; line-height: 1.15; color: var(--text-normal); }
-.loanword-quiz .loanword-options { display: flex; flex-direction: column; gap: var(--size-4-2); }
 .loanword-quiz .loanword-option { display: flex; align-items: center; gap: var(--size-4-3); width: 100%; height: auto; min-height: 44px; margin: 0; padding: var(--size-4-2) var(--size-4-3); justify-content: flex-start !important; flex-direction: row !important; text-align: left; background: var(--background-secondary); color: var(--text-normal); border: 1px solid var(--background-modifier-border) !important; border-radius: var(--radius-m); box-shadow: none; font-size: var(--font-ui-medium); cursor: pointer; }
 .loanword-quiz .loanword-option:hover { border-color: var(--interactive-accent-tint, var(--interactive-accent)) !important; }
-.loanword-quiz .loanword-card .loanword-hint { margin-top: var(--size-4-2); }
 .loanword-quiz .loanword-reveal { display: flex; flex-direction: column; gap: 4px; text-align: center; padding: var(--size-4-3); border-radius: var(--radius-m); background: var(--background-secondary); border: 1px solid var(--background-modifier-border); }
 .loanword-quiz .loanword-other-label { margin-right: 6px; color: var(--text-faint); font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: .08em; }
 .loanword-quiz .loanword-next { width: 100%; min-height: 40px; margin: 0; background: var(--interactive-accent-base, var(--interactive-accent)) !important; color: var(--interactive-accent-text, var(--text-on-accent)) !important; border: 1px solid var(--interactive-accent-tint, var(--interactive-accent)) !important; }
@@ -26,7 +24,7 @@
 .loanword-pop { width: 280px; }
 .loanword-pop .loanword-quiz .loanword-prompt { font-size: 44px; }
 .loanword-quiz .loanword-next:focus, .loanword-quiz .loanword-next:focus-visible { box-shadow: none !important; outline: none; border-color: var(--interactive-accent-text, var(--interactive-accent)) !important; }
-/* The meaning is the answer he grades himself against, so it leads the reveal. */
+/* The meaning is the answer he was asked for, so it leads the reveal. */
 .loanword-quiz .loanword-reveal .loanword-meaning { order: -1; font-size: 1.35em; font-weight: 600; color: var(--text-normal); }
 .loanword-quiz .loanword-reveal .loanword-reading { font-size: 1.25em; color: var(--interactive-accent-text, var(--text-accent)); }
 .loanword-quiz .loanword-answer { width: 100%; height: 44px; padding: 0 var(--size-4-3); font-size: var(--font-ui-medium); text-align: center; border-radius: var(--radius-m); }
@@ -37,4 +35,3 @@
 .loanword-quiz .loanword-verdict[data-verdict="right"] { color: var(--color-green); }
 .loanword-quiz .loanword-verdict[data-verdict="wrong"] { color: var(--color-red); }
 .loanword-quiz .loanword-verdict[data-verdict="dontknow"] { color: var(--text-muted); }
-.loanword-quiz .loanword-override { align-self: center; background: none !important; border: none !important; box-shadow: none !important; color: var(--text-muted); font-size: var(--font-ui-small); text-decoration: underline; padding: 2px 6px; cursor: pointer; }

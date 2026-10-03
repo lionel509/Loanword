@@ -7,7 +7,6 @@ DOM contract (stable class names):
   right | wrong | dontknow:
             .loanword-verdict[data-verdict] "✓ Right" | "✗ You typed “<typed>”" | "The answer"
             .loanword-reveal (renderReveal, unchanged)
-            wrong only: button.loanword-override "I was right"
             button.mod-cta.loanword-next "Next"
   meet:     .loanword-reveal · button.mod-cta.loanword-next "Got it"
 Modal only: .loanword-progress > .loanword-progress-bar; .loanword-foot > .loanword-hint + button.loanword-snooze "Later".
@@ -91,10 +90,6 @@ export function renderCard(
       const text = state === "right" ? "✓ Right" : state === "wrong" ? `✗ You typed “${typed}”` : "The answer";
       el.createDiv({ cls: "loanword-verdict", text, attr: { "data-verdict": state } });
       renderReveal(el, card);
-      if (state === "wrong") {
-        el.createEl("button", { cls: "loanword-override", text: "I was right", attr: { type: "button" } })
-          .addEventListener("click", () => { pending = "know"; enter(); });
-      }
       el.createEl("button", { cls: "mod-cta loanword-next", text: "Next", attr: { type: "button" } })
         .addEventListener("click", () => enter());
     }
@@ -129,7 +124,9 @@ export class QuizPopover {
     this.onDone = onDone;
     this.prevFocus = document.activeElement as HTMLElement | null;
     const el = (this.el = document.body.createDiv({ cls: "loanword-pop" }));
-    this.ui = renderCard(el.createDiv(), card, "recall", (r) => { onDone(r); this.close(); }, () => this.place());
+    el.tabIndex = -1;
+    // draw() removes the focused input, so after a check the popover itself takes focus or Enter would never reach it.
+    this.ui = renderCard(el.createDiv(), card, "recall", (r) => { onDone(r); this.close(); }, (st) => { this.place(); if (st !== "ask") el.focus(); });
     this.place();
     document.addEventListener("mousedown", this.onDown, true);
     document.addEventListener("keydown", this.onKey, true);
