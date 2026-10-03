@@ -219,10 +219,12 @@ export default class LoanwordPlugin extends Plugin {
     if (!force) await new Promise((r) => window.setTimeout(r, Math.random() * 1500));
     if (this.modal) return;
     // Compare-and-set: the file's claim wins; only write ours if it is still free.
+    let allowed = false;
     store.update((st) => {
-      if (!claimedElsewhere()) st.prompt = { day: today, owner: this.instanceId, at: Date.now() };
+      allowed = force || (st.snooze.until <= Date.now() && !(st.pause.until >= today));
+      if (allowed && !claimedElsewhere()) st.prompt = { day: today, owner: this.instanceId, at: Date.now() };
     });
-    if (store.state.prompt?.owner !== this.instanceId) return;
+    if (!allowed || store.state.prompt?.owner !== this.instanceId) return;
 
     const session = this.session();
     if (isDone(session)) { this.releaseClaim(); return; }
